@@ -1,0 +1,19 @@
+[project]
+name = "tennis-sim"
+version = "0.1.0"
+description = "A tennis optimization simulator"
+authors = [{ name = "Kamal", email = "kamalmaharjan11@gmail.com" }]
+requires-python = ">=3.10,<4.0"
+dependencies = [
+	"numpy>=1.24.3,<2.0.0",
+	"flask (>=3.1.3,<4.0.0)",
+]
+
+[tool.poetry]
+# Dependency-only mode (no packaged library yet). Set this to `true` and add
+# a proper package under `src/` when you're ready to publish/install your code.
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"

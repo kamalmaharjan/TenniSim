@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TenniSim</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px auto; max-width: 1040px; }
+      .row { display: grid; grid-template-columns: minmax(360px, 520px) minmax(360px, 520px); gap: 18px; justify-content: center; }
+      .card { border: 1px solid #e6e6e6; border-radius: 12px; padding: 16px; }
+      label { display: block; font-size: 12px; color: #444; margin-bottom: 6px; }
+      input, select { width: 100%; max-width: 220px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .grid > div { max-width: 220px; }
+      .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+      .court-wrap { position: relative; width: 100%; max-width: 520px; }
+      .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
+      .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+      .modebar { display: flex; gap: 8px; margin: 10px 0 8px; }
+      .modebtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
+      .modebtn.active { border-color: #111; }
+      .modebar .spacer { flex: 1; }
+      .modebar .subbtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #222; color: white; cursor: pointer; }
+      pre { background: #0b0b0b; color: #f3f3f3; padding: 12px; border-radius: 10px; overflow: auto; }
+      .error { color: #b00020; white-space: pre-wrap; }
+      .muted { color: #666; font-size: 12px; }
+      .kvs { display: grid; grid-template-columns: 1fr; gap: 2px; }
+      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+      .kv:last-child { border-bottom: none; }
+      .kv .k { color: #555; font-size: 12px; }
+      .kv .v { font-variant-numeric: tabular-nums; text-align: right; }
+      .section { margin-top: 10px; }
+
+      dialog { border: 1px solid #ddd; border-radius: 12px; padding: 0; width: min(920px, calc(100vw - 32px)); }
+      dialog::backdrop { background: rgba(0, 0, 0, 0.30); }
+      .dlg-head { padding: 14px 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+      .dlg-body { padding: 12px 16px 16px; }
+      .dlg-close { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      th, td { padding: 8px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; font-variant-numeric: tabular-nums; }
+      tr.sel { background: #fff5f5; }
+      tr:hover { background: #fafafa; cursor: pointer; }
+      .meta { margin-top: 10px; padding: 10px 12px; border: 1px solid #eee; border-radius: 12px; white-space: pre-wrap; }
+
+      @media (max-width: 980px) {
+        body { margin: 16px auto; max-width: 720px; }
+        .row { grid-template-columns: 1fr; }
+        .kv { grid-template-columns: 120px 1fr; }
+        input, select { max-width: none; }
+        .grid > div { max-width: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>TenniSim</h1>
+    <p class="muted">Minimal UI to run the serve optimizer and forward simulation.</p>
+
+    <div class="row">
+      <div class="card">
+        <h2>Inputs</h2>
+        <form method="post" action="/">
+          <input type="hidden" name="side" id="side" value="{{ form.side }}" />
+          <input type="hidden" name="placement" id="placement" value="{{ form.placement }}" />
+          <div class="grid">
+            <div>
+              <label for="spin_type">Spin type</label>
+              <select name="spin_type" id="spin_type">
+                <option value="flat" {% if form.spin_type == 'flat' %}selected{% endif %}>flat</option>
+                <option value="slice" {% if form.spin_type == 'slice' %}selected{% endif %}>slice</option>
+                <option value="topspin" {% if form.spin_type == 'topspin' %}selected{% endif %}>topspin</option>
+              </select>
+            </div>
+            <div>
+              <label for="server_start_x_m">Server start X (m)</label>
+              <input name="server_start_x_m" id="server_start_x_m" type="number" step="0.01" value="{{ form.server_start_x_m }}" />
+            </div>
+          </div>
+
+          <h3>Court (click to set)</h3>
+          <p class="muted">Click once for server position, then click to set a target in the service box.</p>
+          <div class="modebar">
+            <button type="button" class="modebtn active" id="modeServer">Set server position</button>
+            <button type="button" class="modebtn" id="modeTarget">Set serve target</button>
+            <span class="spacer"></span>
+            <button type="button" class="subbtn" id="openHistory">History</button>
+            <button type="button" class="subbtn" id="clearHistory">Clear runs</button>
+          </div>
+          <div class="court-wrap">
+            <img id="courtImg" class="court-img" src="/imgs/court.jpg" alt="Tennis court" />
+            <canvas id="courtCanvas" class="court-canvas"></canvas>
+          </div>
+
+          <div id="selectedMeta" class="meta muted">Click an orange dot to select a past run.</div>
+
+          <input type="hidden" name="target_x_m" id="target_x_m" value="{{ form.target_x_m }}" />
+          <input type="hidden" name="target_y_m" id="target_y_m" value="{{ form.target_y_m }}" />
+
+          <h3>Player</h3>
+          <div class="grid">
+            <div>
+              <label for="height_m">Height (m)</label>
+              <input name="height_m" id="height_m" type="number" step="0.01" value="{{ form.height_m }}" />
+            </div>
+            <div>
+              <label for="arm_span_m">Arm span (m)</label>
+              <input name="arm_span_m" id="arm_span_m" type="number" step="0.01" value="{{ form.arm_span_m }}" />
+            </div>
+            <div>
+              <label for="body_mass_kg">Body mass (kg)</label>
+              <input name="body_mass_kg" id="body_mass_kg" type="number" step="0.1" value="{{ form.body_mass_kg }}" />
+            </div>
+            <div>
+              <label for="jump_height_m">Jump height (m)</label>
+              <input name="jump_height_m" id="jump_height_m" type="number" step="0.01" value="{{ form.jump_height_m }}" />
+            </div>
+            <div>
+              <label for="swing_speed_mps">Swing speed (m/s)</label>
+              <input name="swing_speed_mps" id="swing_speed_mps" type="number" step="0.1" value="{{ form.swing_speed_mps }}" />
+            </div>
+          </div>
+
+          <h3>Racket</h3>
+          <div class="grid">
+            <div>
+              <label for="racket_length_in">Length (in)</label>
+              <input name="racket_length_in" id="racket_length_in" type="number" step="0.1" value="{{ form.racket_length_in }}" />
+            </div>
+            <div>
+              <label for="string_pattern">String pattern</label>
+              <input name="string_pattern" id="string_pattern" type="text" value="{{ form.string_pattern }}" />
+            </div>
+            <div>
+              <label for="strung_weight_g">Strung weight (g)</label>
+              <input name="strung_weight_g" id="strung_weight_g" type="number" step="1" value="{{ form.strung_weight_g }}" />
+            </div>
+            <div>
+              <label for="head_light_balance_pts">Head light (pts)</label>
+              <input name="head_light_balance_pts" id="head_light_balance_pts" type="number" step="0.1" value="{{ form.head_light_balance_pts }}" />
+            </div>
+            <div>
+              <label for="swing_weight_kgcm2">Swingweight (kg·cm²)</label>
+              <input name="swing_weight_kgcm2" id="swing_weight_kgcm2" type="number" step="1" value="{{ form.swing_weight_kgcm2 }}" />
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Optimize</button>
+          </div>
+        </form>
+
+        {% if error %}
+          <p class="error">{{ error }}</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Result</h2>
+        {% if result %}
+          {% set v_ms = result.best['launch_speed_mps'] %}
+          {% set v_kmh = v_ms * 3.6 %}
+          {% set v_mph = v_ms * 2.2369362920544 %}
+          {% set f_ms = result.sim['final_speed'] %}
+          {% set f_kmh = f_ms * 3.6 %}
+          {% set f_mph = f_ms * 2.2369362920544 %}
+          {% set toss = result.best['toss_offset_m'] %}
+          {% set toss_dist = ((toss[0]*toss[0] + toss[1]*toss[1] + toss[2]*toss[2]) ** 0.5) %}
+
+          <div class="section">
+            <h3>Recommended serve</h3>
+            <div class="kvs">
+              <div class="kv"><div class="k">Launch speed</div><div class="v">{{ '%.0f'|format(v_kmh) }} km/h ({{ '%.0f'|format(v_mph) }} mph)</div></div>
+              <div class="kv"><div class="k">Aim angles</div><div class="v">az {{ '%.1f'|format(result.best['launch_azimuth_deg']) }}°, elev {{ '%.1f'|format(result.best['launch_elevation_deg']) }}°</div></div>
+              <div class="kv"><div class="k">Toss offset</div><div class="v">lat {{ '%.2f'|format(toss[0]) }} m, fwd {{ '%.2f'|format(toss[1]) }} m, up {{ '%.2f'|format(toss[2]) }} m (dist {{ '%.2f'|format(toss_dist) }} m)</div></div>
+              <div class="kv"><div class="k">Net clearance</div><div class="v">{{ '%.3f'|format(result.best['net_clearance_m']) }} m</div></div>
+              <div class="kv"><div class="k">Margin to lines</div><div class="v">{{ '%.3f'|format(result.best['margin_m']) }} m</div></div>
+              <div class="kv"><div class="k">Predicted landing</div><div class="v">x {{ '%.2f'|format(result.best['predicted_landing_m'][0]) }} m, y {{ '%.2f'|format(result.best['predicted_landing_m'][1]) }} m</div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <h3>Simulation (same parameters)</h3>
+            <div class="kvs">
+              <div class="kv"><div class="k">Lands in</div><div class="v">{{ '%.3f'|format(result.sim['t_land']) }} s</div></div>
+              <div class="kv"><div class="k">Final speed</div><div class="v">{{ '%.0f'|format(f_kmh) }} km/h ({{ '%.0f'|format(f_mph) }} mph)</div></div>
+              <div class="kv"><div class="k">Net crossed</div><div class="v">{{ 'yes' if result.sim['net_crossed'] else 'no' }}</div></div>
+              <div class="kv"><div class="k">Landing (sim)</div><div class="v">x {{ '%.2f'|format(result.sim['landing'][0]) }} m, y {{ '%.2f'|format(result.sim['landing'][1]) }} m</div></div>
+            </div>
+          </div>
+
+          {% if form.target_x_m != '' and form.target_y_m != '' %}
+            <div class="section">
+              <h3>Target</h3>
+              {% set tx = form.target_x_m|float %}
+              {% set ty = form.target_y_m|float %}
+              {% set lx = result.best['predicted_landing_m'][0] %}
+              {% set ly = result.best['predicted_landing_m'][1] %}
+              {% set dx = lx - tx %}
+              {% set dy = ly - ty %}
+              <div class="kvs">
+                <div class="kv"><div class="k">Clicked target</div><div class="v">x {{ '%.2f'|format(tx) }} m, y {{ '%.2f'|format(ty) }} m</div></div>
+                <div class="kv"><div class="k">Miss distance</div><div class="v">{{ '%.2f'|format(((dx*dx + dy*dy) ** 0.5)) }} m</div></div>
+              </div>
+            </div>
+          {% endif %}
+
+          <script>
+            window.__latestRun = {
+              id: String(Date.now()),
+              t: Date.now(),
+              // Inputs (snapshot)
+              inputs: {
+                spin_type: {{ form.spin_type|tojson }},
+                side: {{ form.side|tojson }},
+                placement: {{ form.placement|tojson }},
+                server_start_x_m: {{ form.server_start_x_m|float }},
+                target_x_m: {{ (form.target_x_m|float) if form.target_x_m != '' else 'null' }},
+                target_y_m: {{ (form.target_y_m|float) if form.target_y_m != '' else 'null' }},
+                player: {
+                  height_m: {{ form.height_m|float }},
+                  arm_span_m: {{ form.arm_span_m|float }},
+                  body_mass_kg: {{ (form.body_mass_kg|float) if form.body_mass_kg != '' else 'null' }},
+                  jump_height_m: {{ form.jump_height_m|float }},
+                  swing_speed_mps: {{ form.swing_speed_mps|float }},
+                },
+                racket: {
+                  length_in: {{ form.racket_length_in|float }},
+                  string_pattern: {{ form.string_pattern|tojson }},
+                  strung_weight_g: {{ form.strung_weight_g|float }},
+                  head_light_balance_pts: {{ form.head_light_balance_pts|float }},
+                  swing_weight_kgcm2: {{ form.swing_weight_kgcm2|float }},
+                },
+              },
+              // Outputs (snapshot)
+              outputs: {
+                best: {{ result.best|tojson }},
+                sim: {{ result.sim|tojson }},
+              },
+              // Backward-compatible convenience fields
+              spin_type: {{ form.spin_type|tojson }},
+              side: {{ form.side|tojson }},
+              placement: {{ form.placement|tojson }},
+              server_start_x_m: {{ form.server_start_x_m|float }},
+              target_x_m: {{ (form.target_x_m|float) if form.target_x_m != '' else 'null' }},
+              target_y_m: {{ (form.target_y_m|float) if form.target_y_m != '' else 'null' }},
+              best: {{ result.best|tojson }},
+              sim: {{ result.sim|tojson }},
+              x_m: {{ result.sim['landing'][0] }},
+              y_m: {{ result.sim['landing'][1] }},
+            };
+          </script>
+        {% else %}
+          <p class="muted">Run an optimization to see output here.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <dialog id="historyDialog">
+      <div class="dlg-head">
+        <strong>Past runs</strong>
+        <button type="button" class="dlg-close" onclick="document.getElementById('historyDialog').close()">Close</button>
+      </div>
+      <div class="dlg-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Time</th>
+              <th>Side</th>
+              <th>Placement</th>
+              <th>Spin</th>
+              <th>Landing</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+        <p class="muted" style="margin: 10px 0 0;">Click a row to select it (dot turns red).</p>
+      </div>
+    </dialog>
+
+    <script>
+      (function () {
+        const COURT_W_M = 8.23;
+        const COURT_L_M = 23.77;
+
+        // Fallback insets if auto-detection fails.
+        // Values are fractions of the rendered image size.
+        const INSET_FALLBACK = { left: 0.0, right: 0.0, top: 0.0, bottom: 0.0 };
+
+        const img = document.getElementById('courtImg');
+        const canvas = document.getElementById('courtCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const selectedMeta = document.getElementById('selectedMeta');
+        const openHistoryBtn = document.getElementById('openHistory');
+        const clearHistoryBtn = document.getElementById('clearHistory');
+
+        const sideInput = document.getElementById('side');
+        const placementInput = document.getElementById('placement');
+        const serverXInput = document.getElementById('server_start_x_m');
+        const targetXInput = document.getElementById('target_x_m');
+        const targetYInput = document.getElementById('target_y_m');
+
+        const modeServerBtn = document.getElementById('modeServer');
+        const modeTargetBtn = document.getElementById('modeTarget');
+
+        let selectedRunId = null;
+
+        let mode = 'server';
+        let courtBounds = null; // { left, right, top, bottom } in [0..1]
+        let courtCenterXFrac = 0.5; // image-relative x of the center service line
+        let draggingServer = false;
+
+        function setMode(nextMode) {
+          mode = nextMode;
+          modeServerBtn.classList.toggle('active', mode === 'server');
+          modeTargetBtn.classList.toggle('active', mode === 'target');
+        }
+        modeServerBtn.addEventListener('click', () => setMode('server'));
+        modeTargetBtn.addEventListener('click', () => setMode('target'));
+
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+        function inferSideFromServerXValue(serverX) {
+          return (Number.isFinite(serverX) && serverX < 0.0) ? 'ad' : 'deuce';
+        }
+
+        function inferSideFromServerX() {
+          const serverX = parseFloat(serverXInput.value);
+          const side = inferSideFromServerXValue(serverX);
+          sideInput.value = side;
+          return side;
+        }
+
+        function inferPlacementFromTargetX(side, tx) {
+          if (!Number.isFinite(tx)) return null;
+          const box = serviceBoxBounds(side);
+          const u = clamp((tx - box.xMin) / Math.max(1e-9, (box.xMax - box.xMin)), 0.0, 1.0);
+
+          if (side === 'deuce') {
+            if (u < 0.33) return 'wide';
+            if (u > 0.66) return 'T';
+            return 'body';
+          }
+          if (u < 0.33) return 'T';
+          if (u > 0.66) return 'wide';
+          return 'body';
+        }
+
+        function inferPlacementFromTarget(side) {
+          const tx = parseFloat(targetXInput.value);
+          if (!Number.isFinite(tx)) {
+            // Default when no target picked yet.
+            placementInput.value = placementInput.value || 'wide';
+            return placementInput.value || 'wide';
+          }
+
+          const placement = inferPlacementFromTargetX(side, tx) || 'wide';
+          placementInput.value = placement;
+          return placement;
+        }
+
+        function canvasResizeToImage() {
+          const rect = img.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          canvas.width = Math.round(rect.width * dpr);
+          canvas.height = Math.round(rect.height * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          draw();
+        }
+
+        function detectCourtBoundsFromWhiteLines() {
+          // Detect singles-court boundary by locating the most prominent vertical
+          // white lines nearest the center (singles sidelines), and the outer
+          // baselines (top/bottom). Runs once on load on a downscaled copy.
+          try {
+            const maxW = 520;
+            const scale = Math.min(1, maxW / img.naturalWidth);
+            const w = Math.max(1, Math.floor(img.naturalWidth * scale));
+            const h = Math.max(1, Math.floor(img.naturalHeight * scale));
+
+            const off = document.createElement('canvas');
+            off.width = w;
+            off.height = h;
+            const octx = off.getContext('2d', { willReadFrequently: true });
+            octx.drawImage(img, 0, 0, w, h);
+
+            const data = octx.getImageData(0, 0, w, h).data;
+
+            const thr = 235;
+            const y0 = Math.floor(h * 0.12);
+            const y1 = Math.floor(h * 0.88);
+
+            const col = new Array(w).fill(0);
+            const rowAll = new Array(h).fill(0);
+
+            for (let y = 0; y < h; y++) {
+              for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                const r = data[i + 0];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                if (r >= thr && g >= thr && b >= thr) {
+                  if (y >= y0 && y <= y1) col[x] += 1;
+                  rowAll[y] += 1;
+                }
+              }
+            }
+
+            function smooth(arr, win) {
+              const out = new Array(arr.length).fill(0);
+              const half = Math.floor(win / 2);
+              for (let i = 0; i < arr.length; i++) {
+                let s = 0;
+                let c = 0;
+                for (let j = i - half; j <= i + half; j++) {
+                  if (j >= 0 && j < arr.length) { s += arr[j]; c += 1; }
+                }
+                out[i] = s / Math.max(1, c);
+              }
+              return out;
+            }
+
+            function localMaxima(arr, minVal) {
+              const peaks = [];
+              for (let i = 1; i < arr.length - 1; i++) {
+                if (arr[i] >= minVal && arr[i] >= arr[i-1] && arr[i] >= arr[i+1]) {
+                  peaks.push({ i, v: arr[i] });
+                }
+              }
+              peaks.sort((a, b) => b.v - a.v);
+              return peaks;
+            }
+
+            const colS = smooth(col, 9);
+            const rowAllS = smooth(rowAll, 11);
+
+            // Vertical lines: choose the strongest peaks closest to center
+            const colMax = Math.max(...colS);
+            const colPeaks = localMaxima(colS, colMax * 0.55);
+            const cx = w / 2;
+            let leftX = null;
+            let rightX = null;
+            for (const p of colPeaks) {
+              if (p.i < cx && (leftX === null || Math.abs(p.i - cx) < Math.abs(leftX - cx))) leftX = p.i;
+              if (p.i > cx && (rightX === null || Math.abs(p.i - cx) < Math.abs(rightX - cx))) rightX = p.i;
+            }
+
+            // Center service line: strongest peak near the midpoint between singles sidelines.
+            if (leftX !== null && rightX !== null) {
+              const midX = 0.5 * (leftX + rightX);
+              const span = rightX - leftX;
+              let centerX = null;
+              for (const p of colPeaks) {
+                if (p.i <= leftX + 0.22 * span) continue;
+                if (p.i >= rightX - 0.22 * span) continue;
+                if (centerX === null || Math.abs(p.i - midX) < Math.abs(centerX - midX)) centerX = p.i;
+              }
+              if (centerX === null) centerX = midX;
+              courtCenterXFrac = clamp(centerX / w, 0.0, 1.0);
+            } else {
+              courtCenterXFrac = 0.5;
+            }
+
+            // Horizontal lines: choose baselines as strongest peaks near top/bottom
+            // Now detect baselines using ONLY the pixels between the singles sidelines.
+            const row = new Array(h).fill(0);
+            const xL = Math.max(0, Math.min(w - 1, Math.floor(leftX + 2)));
+            const xR = Math.max(0, Math.min(w - 1, Math.floor(rightX - 2)));
+            for (let y = 0; y < h; y++) {
+              let c = 0;
+              for (let x = xL; x <= xR; x++) {
+                const i = (y * w + x) * 4;
+                const r = data[i + 0];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                if (r >= thr && g >= thr && b >= thr) c += 1;
+              }
+              row[y] = c;
+            }
+            const rowS = smooth(row, 13);
+            const rowMax = Math.max(...rowS);
+            const rowPeaks = localMaxima(rowS, rowMax * 0.55);
+            // Baselines live near the very top/bottom of the court area.
+            let topY = null;
+            let bottomY = null;
+            for (const p of rowPeaks) {
+              if (p.i >= h * 0.05 && p.i <= h * 0.30) {
+                if (topY === null || p.i < topY) topY = p.i;
+              }
+              if (p.i >= h * 0.70 && p.i <= h * 0.95) {
+                if (bottomY === null || p.i > bottomY) bottomY = p.i;
+              }
+            }
+
+            // Fallback: if that didn't work, use the global row peaks.
+            if (topY === null || bottomY === null) {
+              const rowAllMax = Math.max(...rowAllS);
+              const rowAllPeaks = localMaxima(rowAllS, rowAllMax * 0.55);
+              for (const p of rowAllPeaks) {
+                if (topY === null && p.i < h * 0.5) topY = p.i;
+                if (bottomY === null && p.i > h * 0.5) bottomY = p.i;
+              }
+            }
+
+            if (leftX === null || rightX === null || topY === null || bottomY === null) {
+              courtBounds = { ...INSET_FALLBACK };
+              courtCenterXFrac = 0.5;
+              return;
+            }
+
+            // Convert to normalized bounds and inset slightly inward.
+            const pad = 0.004;
+            const left = clamp((leftX / w) + pad, 0, 0.49);
+            const right = clamp((1 - (rightX / w)) + pad, 0, 0.49);
+            const top = clamp((topY / h) + pad, 0, 0.49);
+            const bottom = clamp((1 - (bottomY / h)) + pad, 0, 0.49);
+            courtBounds = { left, right, top, bottom };
+          } catch {
+            courtBounds = { ...INSET_FALLBACK };
+            courtCenterXFrac = 0.5;
+          }
+        }
+
+        function getBounds() {
+          return courtBounds || INSET_FALLBACK;
+        }
+
+        function imgToCourtMeters(px, py) {
+          const rect = img.getBoundingClientRect();
+          const x = px - rect.left;
+          const y = py - rect.top;
+
+          const uRaw = x / rect.width;
+          const vRaw = y / rect.height;
+
+          const b = getBounds();
+          const inside = (
+            uRaw >= b.left && uRaw <= (1 - b.right) &&
+            vRaw >= b.top && vRaw <= (1 - b.bottom)
+          );
+          if (!inside) {
+            return null;
+          }
+
+          const u = (uRaw - b.left) / (1 - b.left - b.right);
+          const v = (vRaw - b.top) / (1 - b.top - b.bottom);
+
+          const insetW = (1 - b.left - b.right);
+          const uCenter = clamp((courtCenterXFrac - b.left) / insetW, 0.0, 1.0);
+          const x_m = (u - uCenter) * COURT_W_M;
+          const y_m = (1 - v) * COURT_L_M;
+          return { x_m, y_m };
+        }
+
+        function courtMetersToImg(x_m, y_m) {
+          const rect = img.getBoundingClientRect();
+          const b = getBounds();
+          const insetW = (1 - b.left - b.right);
+          const uCenter = clamp((courtCenterXFrac - b.left) / insetW, 0.0, 1.0);
+          const u = clamp((x_m / COURT_W_M) + uCenter, 0.0, 1.0);
+          const v = 1 - (y_m / COURT_L_M);
+
+          const uInset = b.left + u * (1 - b.left - b.right);
+          const vInset = b.top + v * (1 - b.top - b.bottom);
+
+          return {
+            x: uInset * rect.width,
+            y: vInset * rect.height,
+          };
+        }
+
+        function serviceBoxBounds(side) {
+          const netY = COURT_L_M / 2.0;
+          const yMin = netY;
+          const yMax = netY + 6.40;
+          const halfW = COURT_W_M / 2.0;
+          if (side === 'deuce') {
+            return { xMin: -halfW, xMax: 0.0, yMin, yMax };
+          }
+          return { xMin: 0.0, xMax: halfW, yMin, yMax };
+        }
+
+        function drawMarker(x, y, color) {
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
+        function dist2(ax, ay, bx, by) {
+          const dx = ax - bx;
+          const dy = ay - by;
+          return dx * dx + dy * dy;
+        }
+
+        function getRunHistory() {
+          try {
+            const raw = localStorage.getItem('runHistory') || '[]';
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch {
+            return [];
+          }
+        }
+
+        function setRunHistory(arr) {
+          try { localStorage.setItem('runHistory', JSON.stringify(arr)); } catch {}
+        }
+
+        function normalizeRunSchema(run) {
+          if (!run || typeof run !== 'object') return null;
+
+          const r = { ...run };
+
+          function toNum(v) {
+            if (typeof v === 'number' && Number.isFinite(v)) return v;
+            if (typeof v === 'string') {
+              const n = parseFloat(v);
+              return Number.isFinite(n) ? n : null;
+            }
+            return null;
+          }
+
+          // Pull commonly-used values from either the legacy top-level or the new inputs object.
+          const serverX = toNum(r.server_start_x_m) ?? (r.inputs ? toNum(r.inputs.server_start_x_m) : null);
+          const targetX = toNum(r.target_x_m) ?? (r.inputs ? toNum(r.inputs.target_x_m) : null);
+
+          // Ensure inputs/outputs wrappers exist.
+          if (!r.inputs || typeof r.inputs !== 'object') {
+            r.inputs = {
+              spin_type: r.spin_type ?? null,
+              side: r.side ?? null,
+              placement: r.placement ?? null,
+              server_start_x_m: serverX,
+              target_x_m: toNum(r.target_x_m),
+              target_y_m: toNum(r.target_y_m),
+              player: null,
+              racket: null,
+            };
+          }
+          if (!r.outputs || typeof r.outputs !== 'object') {
+            r.outputs = {
+              best: r.best ?? null,
+              sim: r.sim ?? null,
+            };
+          }
+
+          // Keep top-level convenience fields for table rendering.
+          if (!r.spin_type) r.spin_type = r.inputs.spin_type || (r.outputs.best && r.outputs.best.spin_type) || null;
+          if (!r.side) r.side = r.inputs.side || (r.outputs.best && r.outputs.best.side) || null;
+          if (!r.placement) r.placement = r.inputs.placement || (r.outputs.best && r.outputs.best.placement) || null;
+          if (toNum(r.server_start_x_m) === null && typeof r.inputs.server_start_x_m === 'number') r.server_start_x_m = r.inputs.server_start_x_m;
+          if (toNum(r.target_x_m) === null && typeof r.inputs.target_x_m === 'number') r.target_x_m = r.inputs.target_x_m;
+          if (toNum(r.target_y_m) === null && typeof r.inputs.target_y_m === 'number') r.target_y_m = r.inputs.target_y_m;
+
+          // Infer side/placement when missing.
+          if (!r.side && typeof serverX === 'number') {
+            r.side = inferSideFromServerXValue(serverX);
+            r.inputs.side = r.side;
+          }
+          if (!r.placement && r.side && typeof targetX === 'number') {
+            const p = inferPlacementFromTargetX(r.side, targetX);
+            if (p) {
+              r.placement = p;
+              r.inputs.placement = p;
+            }
+          }
+
+          // Ensure landing coordinates exist.
+          if (toNum(r.x_m) === null || toNum(r.y_m) === null) {
+            const sim = r.outputs.sim || r.sim;
+            const best = r.outputs.best || r.best;
+            if (sim && Array.isArray(sim.landing) && sim.landing.length >= 2) {
+              const lx = toNum(sim.landing[0]);
+              const ly = toNum(sim.landing[1]);
+              if (lx !== null) r.x_m = lx;
+              if (ly !== null) r.y_m = ly;
+            } else if (best && Array.isArray(best.predicted_landing_m) && best.predicted_landing_m.length >= 2) {
+              const lx = toNum(best.predicted_landing_m[0]);
+              const ly = toNum(best.predicted_landing_m[1]);
+              if (lx !== null) r.x_m = lx;
+              if (ly !== null) r.y_m = ly;
+            }
+          }
+
+          // Keep legacy fields aligned.
+          r.best = r.outputs.best;
+          r.sim = r.outputs.sim;
+
+          return r;
+        }
+
+        function migrateRunHistorySchema() {
+          try {
+            const cur = getRunHistory();
+            if (!Array.isArray(cur) || cur.length === 0) return;
+            let changed = false;
+            const next = [];
+            for (const run of cur) {
+              const nr = normalizeRunSchema(run);
+              if (!nr) { changed = true; continue; }
+              // normalizeRunSchema always returns a new object, so this is always true for well-formed entries.
+              changed = true;
+              next.push(nr);
+            }
+            if (changed) setRunHistory(next);
+          } catch {}
+        }
+
+        function migrateOldLandingHistory() {
+          // Backward compat: older versions stored landingHistory = [{x_m, y_m, t}, ...]
+          try {
+            const oldRaw = localStorage.getItem('landingHistory');
+            if (!oldRaw) return;
+            const old = JSON.parse(oldRaw);
+            if (!Array.isArray(old) || old.length === 0) return;
+            const cur = getRunHistory();
+            if (cur.length > 0) return;
+            const migrated = old
+              .filter(p => p && typeof p.x_m === 'number' && typeof p.y_m === 'number')
+              .map((p, idx) => ({
+                id: String((p.t || Date.now()) + idx),
+                t: typeof p.t === 'number' ? p.t : Date.now(),
+                x_m: p.x_m,
+                y_m: p.y_m,
+                spin_type: null,
+                side: null,
+                placement: null,
+                server_start_x_m: null,
+                target_x_m: null,
+                target_y_m: null,
+                best: null,
+                sim: null,
+              }));
+            setRunHistory(migrated);
+          } catch {}
+        }
+
+        function appendLatestRun() {
+          try {
+            const r = window.__latestRun;
+            if (!r || typeof r.x_m !== 'number' || typeof r.y_m !== 'number') return;
+            const arr = getRunHistory();
+            const last = arr.length ? arr[arr.length - 1] : null;
+            const eps = 0.02;
+            const isDup = last && typeof last.x_m === 'number' && typeof last.y_m === 'number'
+              && Math.abs(last.x_m - r.x_m) < eps
+              && Math.abs(last.y_m - r.y_m) < eps;
+            if (!isDup) {
+              arr.push(r);
+              while (arr.length > 20) arr.shift();
+              setRunHistory(arr);
+            }
+          } catch {}
+        }
+
+        function formatTime(t) {
+          try { return new Date(t).toLocaleString(); } catch { return String(t); }
+        }
+
+        function formatNum(v, digits) {
+          return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(digits) : '-';
+        }
+
+        function renderSelectedMeta(run) {
+          if (!selectedMeta) return;
+          if (!run) {
+            selectedMeta.textContent = 'Click an orange dot to select a past run.';
+            return;
+          }
+          const r = normalizeRunSchema(run) || run;
+          const inp = r.inputs || {};
+          const out = r.outputs || {};
+          const player = inp.player || {};
+          const racket = inp.racket || {};
+          const best = out.best || r.best || {};
+          const sim = out.sim || r.sim || {};
+
+          const lines = [];
+          lines.push(`Run: ${r.id || '-'}    Time: ${formatTime(r.t)}`);
+          lines.push(`Spin: ${r.spin_type || '-'}    Side: ${r.side || '-'}    Placement: ${r.placement || '-'}`);
+          lines.push(`Server start X: ${formatNum(r.server_start_x_m, 2)} m    Target: x ${formatNum(r.target_x_m, 2)} m, y ${formatNum(r.target_y_m, 2)} m`);
+          lines.push(`Player: height ${formatNum(player.height_m, 2)} m, arm ${formatNum(player.arm_span_m, 2)} m, mass ${formatNum(player.body_mass_kg, 1)} kg, jump ${formatNum(player.jump_height_m, 2)} m, swing ${formatNum(player.swing_speed_mps, 1)} m/s`);
+          lines.push(`Racket: ${racket.string_pattern || '-'}, ${formatNum(racket.length_in, 1)} in, ${formatNum(racket.strung_weight_g, 0)} g, HL ${formatNum(racket.head_light_balance_pts, 1)} pts, SW ${formatNum(racket.swing_weight_kgcm2, 0)} kg·cm²`);
+          lines.push(`Landing: x ${formatNum(r.x_m, 2)} m, y ${formatNum(r.y_m, 2)} m`);
+
+          if (best && typeof best.launch_speed_mps === 'number') {
+            const kmh = best.launch_speed_mps * 3.6;
+            const mph = best.launch_speed_mps * 2.2369362920544;
+            lines.push(`Best: ${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)    az ${formatNum(best.launch_azimuth_deg, 1)}°    elev ${formatNum(best.launch_elevation_deg, 1)}°    spin ${formatNum(best.spin_rpm, 0)} rpm`);
+          }
+          if (best && Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
+            const to = best.toss_offset_m;
+            const dist = Math.sqrt((to[0]*to[0]) + (to[1]*to[1]) + (to[2]*to[2]));
+            lines.push(`Toss: lat ${formatNum(to[0], 2)} m, fwd ${formatNum(to[1], 2)} m, up ${formatNum(to[2], 2)} m (dist ${formatNum(dist, 2)} m)`);
+          }
+          if (best && (typeof best.net_clearance_m === 'number' || typeof best.margin_m === 'number' || typeof best.score === 'number')) {
+            lines.push(`Safety: net ${formatNum(best.net_clearance_m, 3)} m    margin ${formatNum(best.margin_m, 3)} m    score ${formatNum(best.score, 3)}`);
+          }
+          if (sim && (typeof sim.t_land === 'number' || typeof sim.final_speed === 'number' || typeof sim.net_clearance === 'number')) {
+            const fkmh = (typeof sim.final_speed === 'number') ? (sim.final_speed * 3.6) : null;
+            const fmph = (typeof sim.final_speed === 'number') ? (sim.final_speed * 2.2369362920544) : null;
+            const fStr = (fkmh !== null && fmph !== null) ? `${fkmh.toFixed(0)} km/h (${fmph.toFixed(0)} mph)` : '-';
+            lines.push(`Sim: lands in ${formatNum(sim.t_land, 3)} s    final ${fStr}    net crossed ${sim.net_crossed ? 'yes' : 'no'}    net clr ${formatNum(sim.net_clearance, 3)} m`);
+          }
+
+          selectedMeta.textContent = lines.join('\n');
+        }
+
+        function selectRunById(id) {
+          selectedRunId = id;
+          const arr = getRunHistory();
+          const run = arr.find(r => String(r.id) === String(id));
+          renderSelectedMeta(run || null);
+          draw();
+        }
+
+        function openHistoryDialog() {
+          const dlg = document.getElementById('historyDialog');
+          const tbody = document.getElementById('historyBody');
+          if (!dlg || !tbody) return;
+
+          const arr = getRunHistory().slice().reverse();
+          tbody.innerHTML = '';
+
+          for (const run of arr) {
+            const tr = document.createElement('tr');
+            if (selectedRunId !== null && String(run.id) === String(selectedRunId)) tr.classList.add('sel');
+            tr.innerHTML = `
+              <td>${run.id ?? '-'}</td>
+              <td>${formatTime(run.t)}</td>
+              <td>${run.side ?? '-'}</td>
+              <td>${run.placement ?? '-'}</td>
+              <td>${run.spin_type ?? '-'}</td>
+              <td>x ${formatNum(run.x_m, 2)}, y ${formatNum(run.y_m, 2)}</td>
+            `;
+            tr.addEventListener('click', () => {
+              selectRunById(run.id);
+              try { dlg.close(); } catch {}
+            });
+            tbody.appendChild(tr);
+          }
+
+          try { dlg.showModal(); } catch {
+            // Fallback: if dialog unsupported, do nothing.
+          }
+        }
+
+        function clearAllRuns() {
+          const ok = window.confirm('Clear all saved runs? This cannot be undone.');
+          if (!ok) return;
+          try { localStorage.removeItem('runHistory'); } catch {}
+          try { localStorage.removeItem('landingHistory'); } catch {}
+          selectedRunId = null;
+          renderSelectedMeta(null);
+          draw();
+        }
+
+        function draw() {
+          const rect = img.getBoundingClientRect();
+          ctx.clearRect(0, 0, rect.width, rect.height);
+
+          const side = inferSideFromServerX();
+          const box = serviceBoxBounds(side);
+          const p1 = courtMetersToImg(box.xMin, box.yMin);
+          const p2 = courtMetersToImg(box.xMax, box.yMax);
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+          ctx.lineWidth = 3;
+          const x0 = Math.min(p1.x, p2.x);
+          const y0 = Math.min(p1.y, p2.y);
+          const w = Math.abs(p2.x - p1.x);
+          const h = Math.abs(p2.y - p1.y);
+          const widenPx = 3;
+          ctx.strokeRect(x0 - widenPx, y0, w + 2 * widenPx, h);
+
+          const serverX = parseFloat(serverXInput.value);
+          if (Number.isFinite(serverX)) {
+            const sp = courtMetersToImg(serverX, 0.0);
+            drawMarker(sp.x, sp.y, 'rgba(0, 120, 255, 0.9)');
+          }
+
+          const tx = parseFloat(targetXInput.value);
+          const ty = parseFloat(targetYInput.value);
+          if (Number.isFinite(tx) && Number.isFinite(ty)) {
+            const tp = courtMetersToImg(tx, ty);
+            drawMarker(tp.x, tp.y, 'rgba(0, 170, 60, 0.9)');
+          }
+
+          // Landing history (orange dots)
+          try {
+            const pts = getRunHistory();
+            for (const p of pts) {
+              if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
+              const lp = courtMetersToImg(p.x_m, p.y_m);
+              const isSel = (selectedRunId !== null) && (String(p.id) === String(selectedRunId));
+              drawMarker(lp.x, lp.y, isSel ? 'rgba(210, 0, 0, 0.92)' : 'rgba(255, 140, 0, 0.92)');
+            }
+          } catch {}
+        }
+
+        function pickRunAtPointer(ev) {
+          // If the pointer is near a landing dot, select that run.
+          const rect = img.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const pts = getRunHistory();
+          let best = null;
+          let bestD2 = Infinity;
+          for (const p of pts) {
+            if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
+            const lp = courtMetersToImg(p.x_m, p.y_m);
+            const d2 = dist2(x, y, lp.x, lp.y);
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              best = p;
+            }
+          }
+          const hitR = 12;
+          if (best && bestD2 <= hitR * hitR) {
+            selectRunById(best.id);
+            return true;
+          }
+          return false;
+        }
+
+        function setServerFromPointer(ev) {
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+          // Slider behavior: only x matters; y is pinned to baseline.
+          serverXInput.value = p.x_m.toFixed(2);
+          const side = inferSideFromServerX();
+          inferPlacementFromTarget(side);
+          draw();
+        }
+
+        function setTargetFromPointer(ev) {
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+          const side = inferSideFromServerX();
+          const box = serviceBoxBounds(side);
+          // Clickbox is EXACTLY the singles service box; ignore clicks outside.
+          if (p.x_m < box.xMin || p.x_m > box.xMax || p.y_m < box.yMin || p.y_m > box.yMax) {
+            return;
+          }
+          targetXInput.value = p.x_m.toFixed(3);
+          targetYInput.value = p.y_m.toFixed(3);
+          inferPlacementFromTarget(side);
+          draw();
+        }
+
+        function onPointerDown(ev) {
+          if (pickRunAtPointer(ev)) return;
+          const serverX = parseFloat(serverXInput.value);
+          if (Number.isFinite(serverX)) {
+            const sp = courtMetersToImg(serverX, 0.0);
+            const rect = img.getBoundingClientRect();
+            const x = ev.clientX - rect.left;
+            const y = ev.clientY - rect.top;
+            if (dist2(x, y, sp.x, sp.y) <= 12 * 12) {
+              draggingServer = true;
+              canvas.setPointerCapture(ev.pointerId);
+              setServerFromPointer(ev);
+              return;
+            }
+          }
+
+          if (mode === 'server') {
+            setServerFromPointer(ev);
+          } else {
+            setTargetFromPointer(ev);
+          }
+        }
+
+        function onPointerMove(ev) {
+          if (!draggingServer) return;
+          setServerFromPointer(ev);
+        }
+
+        function onPointerUp(ev) {
+          if (!draggingServer) return;
+          draggingServer = false;
+          try { canvas.releasePointerCapture(ev.pointerId); } catch {}
+        }
+
+        function init() {
+          detectCourtBoundsFromWhiteLines();
+          canvasResizeToImage();
+          canvas.addEventListener('pointerdown', onPointerDown);
+          canvas.addEventListener('pointermove', onPointerMove);
+          canvas.addEventListener('pointerup', onPointerUp);
+          canvas.addEventListener('pointercancel', onPointerUp);
+          window.addEventListener('resize', canvasResizeToImage);
+          serverXInput.addEventListener('input', draw);
+          targetXInput.addEventListener('input', () => { inferPlacementFromTarget(inferSideFromServerX()); draw(); });
+          targetYInput.addEventListener('input', draw);
+
+          migrateOldLandingHistory();
+          migrateRunHistorySchema();
+          appendLatestRun();
+
+          if (openHistoryBtn) {
+            openHistoryBtn.addEventListener('click', openHistoryDialog);
+          }
+
+          if (clearHistoryBtn) {
+            clearHistoryBtn.addEventListener('click', clearAllRuns);
+          }
+
+          draw();
+        }
+
+        if (img.complete) {
+          init();
+        } else {
+          img.addEventListener('load', init);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+### Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+### Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+### Poetry
+# Poetry will recreate these
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+### Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+### Unit test / coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+### Jupyter
+.ipynb_checkpoints/
+
+### Logs
+*.log
+
+### OS / editor
+.DS_Store
+Thumbs.db
+
+### VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+### Local tooling
+.python-version
+

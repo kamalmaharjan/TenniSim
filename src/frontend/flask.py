@@ -1,0 +1,274 @@
+from __future__ import annotations
+
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, TypedDict
+
+from flask import Flask, jsonify, render_template, request, send_from_directory
+
+from src.backend.court import Court
+from src.backend.player import Player
+from src.backend.racket import Racket
+from src.backend.service import Service
+
+
+ROOT_DIR = Path(__file__).resolve().parent
+# ROOT_DIR = <project>/src/frontend
+# parents[0] = <project>/src
+# parents[1] = <project>
+PROJECT_DIR = ROOT_DIR.parents[1]
+IMGS_DIR = PROJECT_DIR / "imgs"
+
+
+class OptimizeRequest(TypedDict, total=False):
+	side: str
+	spin_type: str
+	placement: str
+	server_start_x_m: float
+	jump_height_m: float
+	swing_speed_mps: float
+
+	height_m: float
+	arm_span_m: float
+	body_mass_kg: float
+
+	racket_length_in: float
+	string_pattern: str
+	strung_weight_g: float
+	head_light_balance_pts: float
+	swing_weight_kgcm2: float
+
+	# Optional custom target (meters in backend coord system)
+	target_x_m: float
+	target_y_m: float
+
+
+def create_app() -> Flask:
+	app = Flask(
+		__name__,
+		template_folder=str(ROOT_DIR / "templates"),
+	)
+
+	@app.get("/")
+	def index_get():
+		defaults: dict[str, Any] = {
+			"side": "deuce",
+			"spin_type": "slice",
+			"placement": "wide",
+			"server_start_x_m": 0.20,
+			"jump_height_m": 0.12,
+			"swing_speed_mps": 35.0,
+			"height_m": 1.83,
+			"arm_span_m": 1.88,
+			"body_mass_kg": 78.0,
+			"racket_length_in": 27.0,
+			"string_pattern": "16x19",
+			"strung_weight_g": 315.0,
+			"head_light_balance_pts": 4.0,
+			"swing_weight_kgcm2": 320.0,
+
+			# Optional: click-to-set target
+			"target_x_m": "",
+			"target_y_m": "",
+		}
+		return render_template("index.html", form=defaults, result=None, error=None)
+
+	@app.get("/imgs/<path:filename>")
+	def imgs(filename: str):
+		return send_from_directory(str(IMGS_DIR), filename)
+
+	@app.post("/")
+	def index_post():
+		def f(name: str, default: float) -> float:
+			raw = request.form.get(name, "")
+			return float(raw) if raw != "" else float(default)
+
+		def f_opt(name: str) -> float | None:
+			raw = request.form.get(name, "")
+			return None if raw == "" else float(raw)
+
+		server_start_x_m = f("server_start_x_m", 0.20)
+		form = {
+			"side": request.form.get("side", ""),
+			"spin_type": request.form.get("spin_type", "slice"),
+			"placement": request.form.get("placement", ""),
+			"server_start_x_m": server_start_x_m,
+			"jump_height_m": f("jump_height_m", 0.12),
+			"swing_speed_mps": f("swing_speed_mps", 35.0),
+			"height_m": f("height_m", 1.83),
+			"arm_span_m": f("arm_span_m", 1.88),
+			"body_mass_kg": f("body_mass_kg", 78.0),
+			"racket_length_in": f("racket_length_in", 27.0),
+			"string_pattern": request.form.get("string_pattern", "16x19"),
+			"strung_weight_g": f("strung_weight_g", 315.0),
+			"head_light_balance_pts": f("head_light_balance_pts", 4.0),
+			"swing_weight_kgcm2": f("swing_weight_kgcm2", 320.0),
+
+			"target_x_m": request.form.get("target_x_m", ""),
+			"target_y_m": request.form.get("target_y_m", ""),
+		}
+
+		# Also keep parsed optional target for the optimizer.
+		target_x_m = f_opt("target_x_m")
+		target_y_m = f_opt("target_y_m")
+		if target_x_m is not None:
+			form["target_x_m"] = target_x_m
+		if target_y_m is not None:
+			form["target_y_m"] = target_y_m
+
+		# Infer side/placement if not provided (or invalid)
+		court = Court()
+		side = str(form.get("side") or "").strip().lower()
+		if side not in {"deuce", "ad"}:
+			side = "ad" if float(server_start_x_m) < 0.0 else "deuce"
+		form["side"] = side
+
+		placement = str(form.get("placement") or "").strip()
+		if placement not in {"wide", "body", "T"}:
+			placement = "wide"
+			if target_x_m is not None:
+				half_w = float(court.width) / 2.0
+				if side == "deuce":
+					u = (float(target_x_m) - (-half_w)) / (half_w - (-half_w))
+					if u < 0.33:
+						placement = "wide"
+					elif u > 0.66:
+						placement = "T"
+					else:
+						placement = "body"
+				else:
+					u = (float(target_x_m) - 0.0) / (half_w - 0.0)
+					if u < 0.33:
+						placement = "T"
+					elif u > 0.66:
+						placement = "wide"
+					else:
+						placement = "body"
+		form["placement"] = placement
+
+		try:
+			result = _run_optimizer(form)  # type: ignore[arg-type]
+			return render_template("index.html", form=form, result=result, error=None)
+		except Exception as e:  # noqa: BLE001
+			return render_template("index.html", form=form, result=None, error=str(e))
+
+	@app.post("/api/optimize")
+	def api_optimize():
+		payload = request.get_json(force=True, silent=False) or {}
+		result = _run_optimizer(payload)
+		return jsonify(result)
+
+	return app
+
+
+def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
+	court = Court()
+
+	server_start_x_m = float(payload.get("server_start_x_m", 0.20))
+	side = str(payload.get("side") or "").strip().lower()
+	if side not in {"deuce", "ad"}:
+		side = "ad" if server_start_x_m < 0.0 else "deuce"
+
+	placement = str(payload.get("placement") or "").strip()
+
+	if "racket_length_in" in payload:
+		length_m = float(payload.get("racket_length_in", 27.0)) * 0.0254
+	else:
+		length_m = float(payload.get("racket_length_m", 27.0 * 0.0254))  # type: ignore[typeddict-item]
+
+	if "strung_weight_g" in payload:
+		strung_weight_kg = float(payload.get("strung_weight_g", 315.0)) / 1000.0
+	else:
+		strung_weight_kg = float(payload.get("strung_weight_kg", 0.315))  # type: ignore[typeddict-item]
+
+	racket = Racket(
+		length_m=length_m,
+		string_pattern=str(payload.get("string_pattern", "16x19")),
+		strung_weight_kg=strung_weight_kg,
+		head_light_balance_pts=float(payload.get("head_light_balance_pts", 4.0)),
+		swing_weight_kgcm2=float(payload.get("swing_weight_kgcm2", 320.0)),
+	)
+	player = Player(
+		height_m=float(payload.get("height_m", 1.83)),
+		arm_span_m=float(payload.get("arm_span_m", 1.88)),
+		body_mass_kg=float(payload.get("body_mass_kg", 78.0)),
+		racket=racket,
+	)
+	service = Service(player=player, court=court)
+
+	target_xy_m: tuple[float, float] | None = None
+	tx_raw = payload.get("target_x_m")
+	ty_raw = payload.get("target_y_m")
+	if tx_raw is not None and ty_raw is not None:
+		try:
+			tx = float(tx_raw)  # type: ignore[arg-type]
+			ty = float(ty_raw)  # type: ignore[arg-type]
+			target_xy_m = (tx, ty)
+		except (TypeError, ValueError):
+			target_xy_m = None
+
+	# If placement wasn't provided, infer from target_x when available.
+	if placement not in {"wide", "body", "T"}:
+		placement = "wide"
+		if target_xy_m is not None:
+			tx = float(target_xy_m[0])
+			half_w = float(court.width) / 2.0
+			if side == "deuce":
+				u = (tx - (-half_w)) / (half_w - (-half_w))
+				if u < 0.33:
+					placement = "wide"
+				elif u > 0.66:
+					placement = "T"
+				else:
+					placement = "body"
+			else:
+				u = (tx - 0.0) / (half_w - 0.0)
+				if u < 0.33:
+					placement = "T"
+				elif u > 0.66:
+					placement = "wide"
+				else:
+					placement = "body"
+
+	best = service.optimize_serve(
+		swing_speed_mps=float(payload.get("swing_speed_mps", 35.0)),
+		side=side,
+		spin_type=str(payload.get("spin_type", "slice")),
+		placement=placement,
+		target_xy_m=target_xy_m,
+		server_start_x_m=server_start_x_m,
+		jump_height_m=float(payload.get("jump_height_m", 0.12)),
+	)
+
+	sim = service.simulate_serve(
+		side=side,
+		placement=placement,
+		jump_height_m=float(payload.get("jump_height_m", 0.12)),
+		swing_speed_mps=float(payload.get("swing_speed_mps", 35.0)),
+		server_start_x_m=server_start_x_m,
+		racket=racket,
+		launch_azimuth_deg=float(best.launch_azimuth_deg),
+		launch_elevation_deg=float(best.launch_elevation_deg),
+		spin_rpm=float(best.spin_rpm),
+		spin_axis_unit=best.spin_axis_unit,
+	)
+
+	return {
+		"input": dict(payload),
+		"best": asdict(best),
+		"sim": {
+			**{k: v for k, v in sim.items() if k != "landing"},
+			"landing": [float(sim["landing"][0]), float(sim["landing"][1])],
+		},
+		"best_user_units": {
+			"racket_length_in": float(best.racket.length_m) / 0.0254,
+			"strung_weight_g": float(best.racket.strung_weight_kg) * 1000.0,
+		},
+		"target": {
+			"requested_xy_m": None if target_xy_m is None else [float(target_xy_m[0]), float(target_xy_m[1])],
+			"box_bounds_m": list(service._service_box_bounds(side)),
+		},
+	}
+
+
+app = create_app()
