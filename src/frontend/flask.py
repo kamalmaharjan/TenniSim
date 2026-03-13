@@ -50,6 +50,16 @@ def create_app() -> Flask:
 		template_folder=str(ROOT_DIR / "templates"),
 	)
 
+	@app.after_request
+	def add_cors_headers(resp):
+		# Allow a static frontend (e.g., GitHub Pages) to call the JSON API.
+		# NOTE: You can lock this down to a specific origin later if desired.
+		resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+		resp.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		resp.headers.setdefault("Access-Control-Allow-Headers", "Content-Type")
+		resp.headers.setdefault("Access-Control-Max-Age", "86400")
+		return resp
+
 	@app.get("/")
 	def index_get():
 		defaults: dict[str, Any] = {
@@ -153,8 +163,11 @@ def create_app() -> Flask:
 		except Exception as e:  # noqa: BLE001
 			return render_template("index.html", form=form, result=None, error=str(e))
 
-	@app.post("/api/optimize")
+	@app.route("/api/optimize", methods=["POST", "OPTIONS"])
 	def api_optimize():
+		if request.method == "OPTIONS":
+			# Preflight request for CORS
+			return ("", 204)
 		payload = request.get_json(force=True, silent=False) or {}
 		result = _run_optimizer(payload)
 		return jsonify(result)
