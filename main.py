@@ -1,3 +1,4 @@
+# Conceptualize and optimize a tennis serve based on player attributes, racket specs, and desired serve characteristics. Then simulate the optimized serve to verify results.
 from __future__ import annotations
 
 from dataclasses import asdict
