@@ -236,6 +236,8 @@
               outputs: {
                 best: {{ result.best|tojson }},
                 sim: {{ result.sim|tojson }},
+                sim_samples: {{ result.get('sim_samples')|tojson }},
+                sim_stats: {{ result.get('sim_stats')|tojson }},
               },
               // Backward-compatible convenience fields
               spin_type: {{ form.spin_type|tojson }},
@@ -582,13 +584,13 @@
           return { xMin: 0.0, xMax: halfW, yMin, yMax };
         }
 
-        function drawMarker(x, y, color) {
+        function drawMarker(x, y, color, r = 6) {
           ctx.beginPath();
-          ctx.arc(x, y, 6, 0, Math.PI * 2);
+          ctx.arc(x, y, r, 0, Math.PI * 2);
           ctx.fillStyle = color;
           ctx.fill();
           ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = Math.max(1, Math.round(r / 3));
           ctx.stroke();
         }
 
@@ -747,15 +749,17 @@
             if (!r || typeof r.x_m !== 'number' || typeof r.y_m !== 'number') return;
             const arr = getRunHistory();
             const last = arr.length ? arr[arr.length - 1] : null;
-            const eps = 0.02;
-            const isDup = last && typeof last.x_m === 'number' && typeof last.y_m === 'number'
-              && Math.abs(last.x_m - r.x_m) < eps
-              && Math.abs(last.y_m - r.y_m) < eps;
-            if (!isDup) {
-              arr.push(r);
-              while (arr.length > 20) arr.shift();
-              setRunHistory(arr);
-            }
+            // Avoid only true duplicates (same ID), but allow repeated runs even
+            // when the nominal landing is identical (variance samples can differ).
+            const isDup = last && String(last.id) === String(r.id);
+            if (!isDup) arr.push(r);
+            while (arr.length > 20) arr.shift();
+            setRunHistory(arr);
+
+            // Auto-select the latest run so variance scatter is visible immediately.
+            selectedRunId = r.id;
+            renderSelectedMeta(r);
+            draw();
           } catch {}
         }
 
@@ -780,6 +784,8 @@
           const racket = inp.racket || {};
           const best = out.best || r.best || {};
           const sim = out.sim || r.sim || {};
+          const simStats = out.sim_stats || null;
+          const simSamples = Array.isArray(out.sim_samples) ? out.sim_samples : null;
 
           const lines = [];
           lines.push(`Run: ${r.id || '-'}    Time: ${formatTime(r.t)}`);
@@ -807,6 +813,25 @@
             const fmph = (typeof sim.final_speed === 'number') ? (sim.final_speed * 2.2369362920544) : null;
             const fStr = (fkmh !== null && fmph !== null) ? `${fkmh.toFixed(0)} km/h (${fmph.toFixed(0)} mph)` : '-';
             lines.push(`Sim: lands in ${formatNum(sim.t_land, 3)} s    final ${fStr}    net crossed ${sim.net_crossed ? 'yes' : 'no'}    net clr ${formatNum(sim.net_clearance, 3)} m`);
+          }
+
+          if (simStats && Array.isArray(simStats.landing_std) && simStats.landing_std.length === 2) {
+            const sx = simStats.landing_std[0];
+            const sy = simStats.landing_std[1];
+            const pIn = (typeof simStats.p_in_box === 'number' && Number.isFinite(simStats.p_in_box)) ? (simStats.p_in_box * 100) : null;
+            lines.push(`Variance: n ${simStats.n ?? '-'}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m${pIn === null ? '' : `    in-box ${pIn.toFixed(0)}%`}`);
+          } else if (simSamples && simSamples.length) {
+            // Fallback if stats missing
+            const pts = simSamples
+              .map(s => (s && Array.isArray(s.landing) && s.landing.length === 2) ? [Number(s.landing[0]), Number(s.landing[1])] : null)
+              .filter(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+            if (pts.length >= 2) {
+              const xm = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+              const ym = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+              const sx = Math.sqrt(pts.reduce((a, p) => a + ((p[0]-xm)*(p[0]-xm)), 0) / pts.length);
+              const sy = Math.sqrt(pts.reduce((a, p) => a + ((p[1]-ym)*(p[1]-ym)), 0) / pts.length);
+              lines.push(`Variance: n ${pts.length}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m`);
+            }
           }
 
           selectedMeta.textContent = lines.join('\n');
@@ -898,6 +923,23 @@
               if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
               const lp = courtMetersToImg(p.x_m, p.y_m);
               const isSel = (selectedRunId !== null) && (String(p.id) === String(selectedRunId));
+
+              // If selected, draw its variance scatter (faint) behind the main dot.
+              if (isSel) {
+                const out = (p.outputs && typeof p.outputs === 'object') ? p.outputs : null;
+                const samples = out && Array.isArray(out.sim_samples) ? out.sim_samples : null;
+                if (samples) {
+                  for (const s of samples) {
+                    if (!s || !Array.isArray(s.landing) || s.landing.length < 2) continue;
+                    const sx = Number(s.landing[0]);
+                    const sy = Number(s.landing[1]);
+                    if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
+                    const sp = courtMetersToImg(sx, sy);
+                    drawMarker(sp.x, sp.y, 'rgba(210, 0, 0, 0.22)', 3);
+                  }
+                }
+              }
+
               drawMarker(lp.x, lp.y, isSel ? 'rgba(210, 0, 0, 0.92)' : 'rgba(255, 140, 0, 0.92)');
             }
           } catch {}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+import random
 from typing import Any, TypedDict
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
@@ -177,21 +178,21 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 		length_m = float(payload.get("racket_length_m", 27.0 * 0.0254))  # type: ignore[typeddict-item]
 
 	if "strung_weight_g" in payload:
-		strung_weight_kg = float(payload.get("strung_weight_g", 315.0)) / 1000.0
+		strung_weight_kg = float(payload.get("strung_weight_g", 345.0)) / 1000.0
 	else:
-		strung_weight_kg = float(payload.get("strung_weight_kg", 0.315))  # type: ignore[typeddict-item]
+		strung_weight_kg = float(payload.get("strung_weight_kg", 0.345))  # type: ignore[typeddict-item]
 
 	racket = Racket(
 		length_m=length_m,
-		string_pattern=str(payload.get("string_pattern", "16x19")),
+		string_pattern=str(payload.get("string_pattern", "18x20")),
 		strung_weight_kg=strung_weight_kg,
-		head_light_balance_pts=float(payload.get("head_light_balance_pts", 4.0)),
-		swing_weight_kgcm2=float(payload.get("swing_weight_kgcm2", 320.0)),
+		head_light_balance_pts=float(payload.get("head_light_balance_pts", 7.0)),
+		swing_weight_kgcm2=float(payload.get("swing_weight_kgcm2", 330.0)),
 	)
 	player = Player(
-		height_m=float(payload.get("height_m", 1.83)),
-		arm_span_m=float(payload.get("arm_span_m", 1.88)),
-		body_mass_kg=float(payload.get("body_mass_kg", 78.0)),
+		height_m=float(payload.get("height_m", 1.70)),
+		arm_span_m=float(payload.get("arm_span_m", 1.80)),
+		body_mass_kg=float(payload.get("body_mass_kg", 95.0)),
 		racket=racket,
 	)
 	service = Service(player=player, court=court)
@@ -230,28 +231,107 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 				else:
 					placement = "body"
 
+	swing_speed_mps = float(payload.get("swing_speed_mps", 42.0))
+	jump_height_m = float(payload.get("jump_height_m", 0.5))
+
 	best = service.optimize_serve(
-		swing_speed_mps=float(payload.get("swing_speed_mps", 35.0)),
+		swing_speed_mps=swing_speed_mps,
 		side=side,
 		spin_type=str(payload.get("spin_type", "slice")),
 		placement=placement,
 		target_xy_m=target_xy_m,
 		server_start_x_m=server_start_x_m,
-		jump_height_m=float(payload.get("jump_height_m", 0.12)),
+		jump_height_m=jump_height_m,
 	)
+
+	# Use the optimizer's chosen launch speed when doing forward sims.
+	launch_speed_factor = float(best.launch_speed_mps) / max(1e-9, float(swing_speed_mps))
 
 	sim = service.simulate_serve(
 		side=side,
 		placement=placement,
-		jump_height_m=float(payload.get("jump_height_m", 0.12)),
-		swing_speed_mps=float(payload.get("swing_speed_mps", 35.0)),
+		jump_height_m=jump_height_m,
+		swing_speed_mps=swing_speed_mps,
 		server_start_x_m=server_start_x_m,
 		racket=racket,
 		launch_azimuth_deg=float(best.launch_azimuth_deg),
 		launch_elevation_deg=float(best.launch_elevation_deg),
 		spin_rpm=float(best.spin_rpm),
 		spin_axis_unit=best.spin_axis_unit,
+		launch_speed_factor=launch_speed_factor,
 	)
+
+	# Variance: run a small Monte Carlo ensemble around the optimized serve.
+	# This intentionally introduces slight run-to-run variation while keeping quality.
+	rng = random.Random()
+	n_samples = 16
+	sigma_az_deg = 0.60
+	sigma_elev_deg = 0.60
+	sigma_speed_frac = 0.015
+	sigma_spin_frac = 0.03
+
+	sim_samples: list[dict[str, Any]] = []
+	for _ in range(n_samples):
+		az = float(best.launch_azimuth_deg) + rng.gauss(0.0, sigma_az_deg)
+		elev = float(best.launch_elevation_deg) + rng.gauss(0.0, sigma_elev_deg)
+		speed_fac = float(launch_speed_factor) * max(0.70, 1.0 + rng.gauss(0.0, sigma_speed_frac))
+		spin_rpm = max(0.0, float(best.spin_rpm) * max(0.70, 1.0 + rng.gauss(0.0, sigma_spin_frac)))
+
+		s = service.simulate_serve(
+			side=side,
+			placement=placement,
+			jump_height_m=jump_height_m,
+			swing_speed_mps=swing_speed_mps,
+			server_start_x_m=server_start_x_m,
+			racket=racket,
+			launch_azimuth_deg=az,
+			launch_elevation_deg=elev,
+			spin_rpm=spin_rpm,
+			spin_axis_unit=best.spin_axis_unit,
+			launch_speed_factor=speed_fac,
+		)
+		sim_samples.append(
+			{
+				"landing": [float(s["landing"][0]), float(s["landing"][1])],
+				"net_crossed": bool(s.get("net_crossed")),
+				"net_clearance": float(s.get("net_clearance", float("nan"))),
+				"t_land": float(s.get("t_land", float("nan"))),
+			}
+		)
+
+	# Summary stats for the UI.
+	box_x_min, box_x_max, box_y_min, box_y_max = service._service_box_bounds(side)
+	xy = [
+		(tuple(s["landing"]) if isinstance(s.get("landing"), list) and len(s["landing"]) == 2 else None)
+		for s in sim_samples
+	]
+	xy2 = [(float(x), float(y)) for p in xy if p is not None for x, y in [p]]
+	if xy2:
+		xs = [p[0] for p in xy2]
+		ys = [p[1] for p in xy2]
+		xm = sum(xs) / len(xs)
+		ym = sum(ys) / len(ys)
+		xv = sum((x - xm) ** 2 for x in xs) / len(xs)
+		yv = sum((y - ym) ** 2 for y in ys) / len(ys)
+		sx = xv ** 0.5
+		sy = yv ** 0.5
+		p_in_box = sum(1 for x, y in xy2 if (box_x_min <= x <= box_x_max and box_y_min <= y <= box_y_max)) / len(xy2)
+	else:
+		xm = ym = sx = sy = float("nan")
+		p_in_box = float("nan")
+
+	sim_stats = {
+		"n": int(n_samples),
+		"sigma": {
+			"az_deg": float(sigma_az_deg),
+			"elev_deg": float(sigma_elev_deg),
+			"speed_frac": float(sigma_speed_frac),
+			"spin_frac": float(sigma_spin_frac),
+		},
+		"landing_mean": [float(xm), float(ym)],
+		"landing_std": [float(sx), float(sy)],
+		"p_in_box": float(p_in_box),
+	}
 
 	return {
 		"input": dict(payload),
@@ -260,6 +340,8 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 			**{k: v for k, v in sim.items() if k != "landing"},
 			"landing": [float(sim["landing"][0]), float(sim["landing"][1])],
 		},
+		"sim_samples": sim_samples,
+		"sim_stats": sim_stats,
 		"best_user_units": {
 			"racket_length_in": float(best.racket.length_m) / 0.0254,
 			"strung_weight_g": float(best.racket.strung_weight_kg) * 1000.0,

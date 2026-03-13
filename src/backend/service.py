@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -64,6 +65,7 @@ class Service:
     # Tennis ball constants
     BALL_RADIUS_M = 0.0335
     BALL_MASS_KG = 0.057
+    BALL_AREA_M2 = float(math.pi * (BALL_RADIUS_M ** 2))
 
     # Aerodynamics (tuned for "reasonable" trajectories, not lab precision)
     AIR_DENSITY = 1.225
@@ -105,12 +107,56 @@ class Service:
         # Aim a bit inside the service line for speed + margin.
         y = y_max - 0.8
         if placement == "T":
-            x = (x_max - 0.35) if side == "ad" else (x_min + 0.35)
+            # "T" is near the center service line (x=0), but aim slightly inside.
+            x = (x_min + 0.35) if side == "ad" else (x_max - 0.35)
         elif placement == "wide":
+            # "Wide" is near the singles sideline, but aim slightly inside.
             x = (x_max - 0.45) if side == "ad" else (x_min + 0.45)
         else:  # body
             x = (x_min + x_max) / 2.0
         return np.array([x, y, 0.0], dtype=float)
+
+    @staticmethod
+    def _placement_margin_m(
+        *,
+        side: ServeSide,
+        placement: ServePlacement,
+        x_land: float,
+        y_land: float,
+        box_x_min: float,
+        box_x_max: float,
+        box_y_min: float,
+        box_y_max: float,
+    ) -> float:
+        """Margin (m) to the relevant boundaries for the requested placement.
+
+        For aggressive targets ("wide" / "T"), we intentionally *do not* penalize
+        being close to the boundary line we're aiming at; otherwise the optimizer
+        will systematically drift toward the middle of the box.
+        """
+        dx_left = x_land - box_x_min
+        dx_right = box_x_max - x_land
+        dy_near = y_land - box_y_min
+        dy_far = box_y_max - y_land
+
+        if placement == "wide":
+            # Wide wants to hug the outside singles sideline.
+            if side == "deuce":
+                # deuce box is [-half_w, 0], wide is near x_min
+                return float(min(dx_right, dy_near, dy_far))
+            # ad box is [0, +half_w], wide is near x_max
+            return float(min(dx_left, dy_near, dy_far))
+
+        if placement == "T":
+            # T wants to hug the center service line (x=0).
+            if side == "deuce":
+                # deuce box max boundary is x=0
+                return float(min(dx_left, dy_near, dy_far))
+            # ad box min boundary is x=0
+            return float(min(dx_right, dy_near, dy_far))
+
+        # body: prefer away from all lines
+        return float(min(dx_left, dx_right, dy_near, dy_far))
 
     def _default_server_start_x(self, side: ServeSide) -> float:
         """Default baseline x near the center mark (UI-friendly)."""
@@ -185,44 +231,79 @@ class Service:
     # -------------------------
     @classmethod
     def _ball_area(cls) -> float:
-        return float(np.pi * (cls.BALL_RADIUS_M ** 2))
+        # Kept for backward compatibility; hot paths should use BALL_AREA_M2.
+        return float(cls.BALL_AREA_M2)
+
+    def _forces_accel_components(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        wx: float,
+        wy: float,
+        wz: float,
+    ) -> tuple[float, float, float]:
+        """Acceleration from gravity + drag + Magnus (scalar fast path)."""
+        speed2 = (vx * vx) + (vy * vy) + (vz * vz)
+        if speed2 < 1e-18:
+            return (0.0, 0.0, -9.81)
+        speed = math.sqrt(speed2)
+
+        rho = float(self.AIR_DENSITY)
+        cd = float(self.DRAG_COEFF)
+        area = float(self.BALL_AREA_M2)
+        m = float(self.BALL_MASS_KG)
+
+        # Quadratic drag
+        drag_mag = 0.5 * rho * cd * area / m
+        a_drag_x = -drag_mag * speed * vx
+        a_drag_y = -drag_mag * speed * vy
+        a_drag_z = -drag_mag * speed * vz
+
+        # Magnus lift: direction is omega x v
+        omega2 = (wx * wx) + (wy * wy) + (wz * wz)
+        if omega2 < 1e-18:
+            return (a_drag_x, a_drag_y, a_drag_z - 9.81)
+
+        omega_mag = math.sqrt(omega2)
+        S = (omega_mag * float(self.BALL_RADIUS_M)) / speed
+        cl = (1.2 * S) / (1.0 + 3.0 * S)
+
+        # Cross product omega x v
+        lx = (wy * vz) - (wz * vy)
+        ly = (wz * vx) - (wx * vz)
+        lz = (wx * vy) - (wy * vx)
+        ln2 = (lx * lx) + (ly * ly) + (lz * lz)
+        if ln2 < 1e-18:
+            return (a_drag_x, a_drag_y, a_drag_z - 9.81)
+
+        inv_ln = 1.0 / math.sqrt(ln2)
+        lx *= inv_ln
+        ly *= inv_ln
+        lz *= inv_ln
+
+        lift_mag = 0.5 * rho * cl * area / m
+        # magnitude ~ v^2
+        lift_scale = lift_mag * speed2
+        a_mag_x = lift_scale * lx
+        a_mag_y = lift_scale * ly
+        a_mag_z = lift_scale * lz
+
+        return (
+            a_drag_x + a_mag_x,
+            a_drag_y + a_mag_y,
+            a_drag_z + a_mag_z - 9.81,
+        )
 
     def _forces_accel(self, vel: np.ndarray, omega: np.ndarray) -> np.ndarray:
         """Acceleration from gravity + drag + Magnus."""
         v = np.asarray(vel, dtype=float)
-        speed = float(np.linalg.norm(v))
-        if speed < 1e-9:
-            return np.array([0.0, 0.0, -9.81], dtype=float)
-
-        area = self._ball_area()
-        rho = self.AIR_DENSITY
-        m = self.BALL_MASS_KG
-
-        # Quadratic drag
-        drag_mag = 0.5 * rho * self.DRAG_COEFF * area / m
-        a_drag = -drag_mag * speed * v
-
-        # Magnus lift: direction is omega x v
-        omega_vec = np.asarray(omega, dtype=float)
-        omega_mag = float(np.linalg.norm(omega_vec))
-        if omega_mag < 1e-9:
-            a_magnus = np.zeros(3, dtype=float)
-        else:
-            # Spin parameter S = omega*r / v
-            S = (omega_mag * self.BALL_RADIUS_M) / speed
-            # Simple saturating lift coefficient curve
-            cl = (1.2 * S) / (1.0 + 3.0 * S)
-
-            lift_dir = np.cross(omega_vec, v)
-            lift_norm = float(np.linalg.norm(lift_dir))
-            if lift_norm < 1e-9:
-                a_magnus = np.zeros(3, dtype=float)
-            else:
-                lift_dir = lift_dir / lift_norm
-                lift_mag = 0.5 * rho * cl * area / m
-                a_magnus = lift_mag * (speed ** 2) * lift_dir
-
-        return a_drag + a_magnus + np.array([0.0, 0.0, -9.81], dtype=float)
+        w = np.asarray(omega, dtype=float)
+        ax, ay, az = self._forces_accel_components(
+            float(v[0]), float(v[1]), float(v[2]),
+            float(w[0]), float(w[1]), float(w[2]),
+        )
+        return np.array([ax, ay, az], dtype=float)
 
     def _racket_speed_spin_multipliers(self, racket: Racket, *, spin_type: str) -> tuple[float, float]:
         """Heuristic multipliers (speed_mul, spin_mul) from racket properties.
@@ -281,59 +362,67 @@ class Service:
         t_max: float = 3.0,
     ) -> dict:
         """Simulate until first ground contact (z<=0). Returns summary."""
-        pos = np.asarray(pos0, dtype=float).copy()
-        vel = np.asarray(vel0, dtype=float).copy()
-        omega = np.asarray(omega, dtype=float)
+        x = float(pos0[0])
+        y = float(pos0[1])
+        z = float(pos0[2])
+        vx = float(vel0[0])
+        vy = float(vel0[1])
+        vz = float(vel0[2])
+        wx = float(omega[0])
+        wy = float(omega[1])
+        wz = float(omega[2])
 
-        net_y = self._net_y()
+        net_y = float(self._net_y())
         net_crossed = False
-        net_clearance = None
+        net_clearance: float | None = None
 
         t = 0.0
-        prev_pos = pos.copy()
-        prev_vel = vel.copy()
 
-        while t < t_max:
-            prev_pos = pos.copy()
-            prev_vel = vel.copy()
+        while t < float(t_max):
+            prev_x, prev_y, prev_z = x, y, z
+            prev_vx, prev_vy, prev_vz = vx, vy, vz
 
             # Semi-implicit Euler (stable enough at small dt here)
-            acc = self._forces_accel(vel, omega)
-            vel = vel + acc * dt
-            pos = pos + vel * dt
+            ax, ay, az = self._forces_accel_components(vx, vy, vz, wx, wy, wz)
+            vx += ax * dt
+            vy += ay * dt
+            vz += az * dt
+            x += vx * dt
+            y += vy * dt
+            z += vz * dt
             t += dt
 
             # Net plane crossing interpolation
-            if (not net_crossed) and (prev_pos[1] <= net_y <= pos[1]):
+            if (not net_crossed) and (prev_y <= net_y <= y):
                 net_crossed = True
-                # Interpolate by y
-                denom = (pos[1] - prev_pos[1])
-                alpha = 0.0 if abs(float(denom)) < 1e-9 else (net_y - prev_pos[1]) / denom
-                x_at_net = float(prev_pos[0] + alpha * (pos[0] - prev_pos[0]))
-                z_at_net = float(prev_pos[2] + alpha * (pos[2] - prev_pos[2]))
-                net_clearance = z_at_net - self._net_height_at_x(x_at_net)
+                denom = (y - prev_y)
+                alpha = 0.0 if abs(float(denom)) < 1e-12 else (net_y - prev_y) / denom
+                x_at_net = float(prev_x + alpha * (x - prev_x))
+                z_at_net = float(prev_z + alpha * (z - prev_z))
+                net_clearance = z_at_net - float(self._net_height_at_x(x_at_net))
 
-            # Ground contact (on opponent side only matters, but we stop at first bounce)
-            if pos[2] <= 0.0 and t > 0.05:
-                # interpolate to z=0 for landing (linear)
-                dz = pos[2] - prev_pos[2]
-                alpha = 0.0 if abs(float(dz)) < 1e-9 else (0.0 - prev_pos[2]) / dz
-                x_land = float(prev_pos[0] + alpha * (pos[0] - prev_pos[0]))
-                y_land = float(prev_pos[1] + alpha * (pos[1] - prev_pos[1]))
+            # Ground contact (stop at first bounce)
+            if z <= 0.0 and t > 0.05:
+                dz = (z - prev_z)
+                alpha = 0.0 if abs(float(dz)) < 1e-12 else (0.0 - prev_z) / dz
+                x_land = float(prev_x + alpha * (x - prev_x))
+                y_land = float(prev_y + alpha * (y - prev_y))
+                final_speed = math.sqrt((prev_vx * prev_vx) + (prev_vy * prev_vy) + (prev_vz * prev_vz))
                 return {
                     "t_land": float(t),
                     "landing": np.array([x_land, y_land], dtype=float),
                     "net_clearance": float(net_clearance) if net_clearance is not None else float("nan"),
                     "net_crossed": bool(net_crossed),
-                    "final_speed": float(np.linalg.norm(prev_vel)),
+                    "final_speed": float(final_speed),
                 }
 
+        final_speed = math.sqrt((vx * vx) + (vy * vy) + (vz * vz))
         return {
             "t_land": float("nan"),
             "landing": np.array([float("nan"), float("nan")], dtype=float),
             "net_clearance": float("nan"),
             "net_crossed": bool(net_crossed),
-            "final_speed": float(np.linalg.norm(vel)),
+            "final_speed": float(final_speed),
         }
 
     def simulate_serve(
@@ -467,16 +556,46 @@ class Service:
             speed_factor = 1.58
 
         speed_mul, spin_mul = self._racket_speed_spin_multipliers(racket_used, spin_type=spin_type)
-        launch_speed = float(max(10.0, (speed_factor * speed_mul) * float(swing_speed_mps)))
+        launch_speed_base = float(max(10.0, (speed_factor * speed_mul) * float(swing_speed_mps)))
+
+        aggressive_grid = placement in {"wide", "T"}
 
         # Spin ranges (scaled by racket pattern/balance/swingweight heuristic)
         if spin_type == "flat":
             base = np.array([0.0, 400.0, 900.0])
         elif spin_type == "slice":
-            base = np.array([1400.0, 2400.0, 3400.0, 4400.0])
+            # Include higher sidespin options so the model can produce genuinely wide serves.
+            base = (
+                np.array([1800.0, 3600.0, 5200.0, 6800.0, 8200.0])
+                if aggressive_grid
+                else np.array([1800.0, 3600.0, 5400.0, 7200.0])
+            )
         else:
-            base = np.array([2400.0, 3800.0, 5200.0, 6800.0])
+            # Kick/topspin often runs higher RPM in real serves.
+            base = (
+                np.array([2800.0, 4800.0, 6600.0, 8200.0, 9000.0])
+                if aggressive_grid
+                else np.array([2800.0, 4800.0, 6800.0, 8800.0])
+            )
         spin_rpm_grid = np.clip(base * spin_mul, 0.0, 9000.0)
+
+        # Placement-specific aggressiveness: for wide/T (and explicit click targets),
+        # prioritize the chosen spot over conservative "stay centered" margins.
+        eff_target_weight = float(target_weight)
+        eff_margin_weight = float(margin_weight)
+        if placement in {"wide", "T"}:
+            eff_target_weight *= 1.6
+            eff_margin_weight *= 0.75
+        if target_xy_m is not None:
+            eff_target_weight *= 1.25
+            eff_margin_weight *= 0.85
+
+        # Small speed grid: lets the optimizer find better depth when aiming wide/T.
+        # For non-aggressive placements, keep speed fixed for performance.
+        if aggressive_grid:
+            speed_grid = np.array([1.02, 1.14], dtype=float)
+        else:
+            speed_grid = np.array([1.00], dtype=float)
 
         # Search angles.
         # We center azimuth around the geometric line from contact -> target.
@@ -484,16 +603,16 @@ class Service:
         # inside the service box at high launch speeds.
         to_target_xy = target[:2] - contact[:2]
         az0_deg = float(np.rad2deg(np.arctan2(to_target_xy[0], to_target_xy[1])))
-        az_span = 14.0
-        az_grid = np.linspace(az0_deg - az_span, az0_deg + az_span, 29)
+        az_span = 16.0 if aggressive_grid else 14.0
+        az_grid = np.linspace(az0_deg - az_span, az0_deg + az_span, 25 if aggressive_grid else 21)
         az_grid = np.clip(az_grid, -35.0, 35.0)
 
         if spin_type == "flat":
-            elev_grid = np.linspace(-18.0, 8.0, 27)
+            elev_grid = np.linspace(-18.0, 8.0, 21)
         elif spin_type == "slice":
-            elev_grid = np.linspace(-16.0, 10.0, 27)
+            elev_grid = np.linspace(-16.0, 10.0, 21)
         else:  # topspin/kick
-            elev_grid = np.linspace(-12.0, 16.0, 29)
+            elev_grid = np.linspace(-12.0, 16.0, 23)
 
         best: ServeParams | None = None
         best_score = -float("inf")
@@ -512,79 +631,182 @@ class Service:
                     ],
                     dtype=float,
                 )
-                vel0 = launch_speed * dir_vec
 
-                for spin_rpm in spin_rpm_grid:
-                    omega_mag = float(spin_rpm) * 2.0 * np.pi / 60.0
-                    if omega_mag < 1e-9:
-                        omega = np.zeros(3, dtype=float)
-                        spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
-                    else:
-                        # Spin axis selection (handedness-free heuristic):
-                        # - Slice: omega ~ +z (gives lateral Magnus). Sign depends on side.
-                        # - Topspin: omega ~ -x (gives downward Magnus).
-                        if spin_type == "slice":
-                            spin_axis = np.array([0.0, 0.0, -1.0 if side == "deuce" else 1.0], dtype=float)
-                        elif spin_type == "topspin":
-                            spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
-                        else:
+                for speed_fac in speed_grid:
+                    launch_speed = float(launch_speed_base * float(speed_fac))
+                    vel0 = launch_speed * dir_vec
+
+                    for spin_rpm in spin_rpm_grid:
+                        omega_mag = float(spin_rpm) * 2.0 * np.pi / 60.0
+                        if omega_mag < 1e-9:
+                            omega = np.zeros(3, dtype=float)
                             spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
-                        omega = omega_mag * spin_axis
+                        else:
+                            # Spin axis selection (handedness-free heuristic):
+                            # - Slice: omega ~ +z (gives lateral Magnus). Sign depends on side.
+                            # - Topspin: omega ~ -x (gives downward Magnus).
+                            if spin_type == "slice":
+                                spin_axis = np.array([0.0, 0.0, -1.0 if side == "deuce" else 1.0], dtype=float)
+                            elif spin_type == "topspin":
+                                spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
+                            else:
+                                spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
+                            omega = omega_mag * spin_axis
 
-                    sim = self._simulate(contact, vel0, omega)
-                    if not sim["net_crossed"]:
-                        continue
-                    if not np.isfinite(sim["net_clearance"]) or sim["net_clearance"] < min_net_clearance_m:
-                        continue
+                        sim = self._simulate(contact, vel0, omega)
+                        if not sim["net_crossed"]:
+                            continue
+                        if not np.isfinite(sim["net_clearance"]) or sim["net_clearance"] < min_net_clearance_m:
+                            continue
 
-                    landing = sim["landing"]
-                    x_land = float(landing[0])
-                    y_land = float(landing[1])
+                        landing = sim["landing"]
+                        x_land = float(landing[0])
+                        y_land = float(landing[1])
 
-                    in_box = (box_x_min <= x_land <= box_x_max) and (box_y_min <= y_land <= box_y_max)
-                    if not in_box:
-                        continue
+                        in_box = (box_x_min <= x_land <= box_x_max) and (box_y_min <= y_land <= box_y_max)
+                        if not in_box:
+                            continue
 
-                    # Margin to lines (minimum distance to any boundary)
-                    margin = min(
-                        x_land - box_x_min,
-                        box_x_max - x_land,
-                        y_land - box_y_min,
-                        box_y_max - y_land,
-                    )
-
-                    # Distance to desired target point in the box
-                    target_err = float(np.linalg.norm(np.array([x_land, y_land, 0.0]) - target))
-
-                    # Score: prefer speed but heavily penalize missing the chosen spot.
-                    score = (
-                        speed_weight * (launch_speed / 70.0)
-                        + margin_weight * margin
-                        - target_weight * target_err
-                    )
-                    # Encourage safe net clearance slightly (but not too much)
-                    score += 2.0 * float(sim["net_clearance"])
-
-                    if score > best_score:
-                        toss = np.array(toss_offset_m, dtype=float) if toss_offset_m is not None else self._recommended_toss_offset(side, spin_type, placement)
-                        best_score = score
-                        best = ServeParams(
+                        # Margin to lines. For "wide"/"T", don't penalize being close
+                        # to the intended boundary line, otherwise results cluster mid-box.
+                        margin = self._placement_margin_m(
                             side=side,
-                            spin_type=spin_type,
                             placement=placement,
-                            contact_point_m=(float(contact[0]), float(contact[1]), float(contact[2])),
-                            toss_offset_m=(float(toss[0]), float(toss[1]), float(toss[2])),
-                            launch_speed_mps=launch_speed,
-                            launch_azimuth_deg=float(az_deg),
-                            launch_elevation_deg=float(elev_deg),
-                            spin_rpm=float(spin_rpm),
-                            spin_axis_unit=(float(spin_axis[0]), float(spin_axis[1]), float(spin_axis[2])),
-                            predicted_landing_m=(x_land, y_land),
-                            net_clearance_m=float(sim["net_clearance"]),
-                            margin_m=float(margin),
-                            score=float(score),
-                            racket=racket_used,
+                            x_land=x_land,
+                            y_land=y_land,
+                            box_x_min=float(box_x_min),
+                            box_x_max=float(box_x_max),
+                            box_y_min=float(box_y_min),
+                            box_y_max=float(box_y_max),
                         )
+
+                        # Distance to desired target point in the box
+                        target_err = float(np.linalg.norm(np.array([x_land, y_land, 0.0]) - target))
+
+                        # Score: prefer speed but heavily penalize missing the chosen spot.
+                        score = (
+                            speed_weight * (launch_speed / 70.0)
+                            + eff_margin_weight * margin
+                            - eff_target_weight * target_err
+                        )
+                        # Encourage safe net clearance slightly (but not too much)
+                        score += 2.0 * float(sim["net_clearance"])
+
+                        if score > best_score:
+                            toss = np.array(toss_offset_m, dtype=float) if toss_offset_m is not None else self._recommended_toss_offset(side, spin_type, placement)
+                            best_score = score
+                            best = ServeParams(
+                                side=side,
+                                spin_type=spin_type,
+                                placement=placement,
+                                contact_point_m=(float(contact[0]), float(contact[1]), float(contact[2])),
+                                toss_offset_m=(float(toss[0]), float(toss[1]), float(toss[2])),
+                                launch_speed_mps=float(launch_speed),
+                                launch_azimuth_deg=float(az_deg),
+                                launch_elevation_deg=float(elev_deg),
+                                spin_rpm=float(spin_rpm),
+                                spin_axis_unit=(float(spin_axis[0]), float(spin_axis[1]), float(spin_axis[2])),
+                                predicted_landing_m=(x_land, y_land),
+                                net_clearance_m=float(sim["net_clearance"]),
+                                margin_m=float(margin),
+                                score=float(score),
+                                racket=racket_used,
+                            )
+
+        # Local refinement: for aggressive targets, do a small fine-grained search
+        # around the best coarse solution. This improves "hug the line" serves
+        # without paying the cost of a dense global grid.
+        if best is not None and aggressive_grid:
+            az_fine = np.linspace(float(best.launch_azimuth_deg) - 6.0, float(best.launch_azimuth_deg) + 6.0, 21)
+            elev_fine = np.linspace(float(best.launch_elevation_deg) - 3.0, float(best.launch_elevation_deg) + 3.0, 17)
+            az_fine = np.clip(az_fine, -35.0, 35.0)
+
+            for elev_deg in elev_fine:
+                elev = np.deg2rad(float(elev_deg))
+                for az_deg in az_fine:
+                    az = np.deg2rad(float(az_deg))
+
+                    dir_vec = np.array(
+                        [
+                            np.sin(az) * np.cos(elev),
+                            np.cos(az) * np.cos(elev),
+                            np.sin(elev),
+                        ],
+                        dtype=float,
+                    )
+
+                    for speed_fac in speed_grid:
+                        launch_speed = float(launch_speed_base * float(speed_fac))
+                        vel0 = launch_speed * dir_vec
+
+                        for spin_rpm in spin_rpm_grid:
+                            omega_mag = float(spin_rpm) * 2.0 * np.pi / 60.0
+                            if omega_mag < 1e-9:
+                                omega = np.zeros(3, dtype=float)
+                                spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
+                            else:
+                                if spin_type == "slice":
+                                    spin_axis = np.array([0.0, 0.0, -1.0 if side == "deuce" else 1.0], dtype=float)
+                                elif spin_type == "topspin":
+                                    spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
+                                else:
+                                    spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
+                                omega = omega_mag * spin_axis
+
+                            sim = self._simulate(contact, vel0, omega)
+                            if not sim["net_crossed"]:
+                                continue
+                            if not np.isfinite(sim["net_clearance"]) or sim["net_clearance"] < min_net_clearance_m:
+                                continue
+
+                            landing = sim["landing"]
+                            x_land = float(landing[0])
+                            y_land = float(landing[1])
+
+                            in_box = (box_x_min <= x_land <= box_x_max) and (box_y_min <= y_land <= box_y_max)
+                            if not in_box:
+                                continue
+
+                            margin = self._placement_margin_m(
+                                side=side,
+                                placement=placement,
+                                x_land=x_land,
+                                y_land=y_land,
+                                box_x_min=float(box_x_min),
+                                box_x_max=float(box_x_max),
+                                box_y_min=float(box_y_min),
+                                box_y_max=float(box_y_max),
+                            )
+
+                            target_err = float(np.linalg.norm(np.array([x_land, y_land, 0.0]) - target))
+
+                            score = (
+                                speed_weight * (launch_speed / 70.0)
+                                + eff_margin_weight * margin
+                                - eff_target_weight * target_err
+                            )
+                            score += 2.0 * float(sim["net_clearance"])
+
+                            if score > best_score:
+                                toss = np.array(toss_offset_m, dtype=float) if toss_offset_m is not None else self._recommended_toss_offset(side, spin_type, placement)
+                                best_score = score
+                                best = ServeParams(
+                                    side=side,
+                                    spin_type=spin_type,
+                                    placement=placement,
+                                    contact_point_m=(float(contact[0]), float(contact[1]), float(contact[2])),
+                                    toss_offset_m=(float(toss[0]), float(toss[1]), float(toss[2])),
+                                    launch_speed_mps=float(launch_speed),
+                                    launch_azimuth_deg=float(az_deg),
+                                    launch_elevation_deg=float(elev_deg),
+                                    spin_rpm=float(spin_rpm),
+                                    spin_axis_unit=(float(spin_axis[0]), float(spin_axis[1]), float(spin_axis[2])),
+                                    predicted_landing_m=(x_land, y_land),
+                                    net_clearance_m=float(sim["net_clearance"]),
+                                    margin_m=float(margin),
+                                    score=float(score),
+                                    racket=racket_used,
+                                )
 
         if best is None:
             raise RuntimeError(
