@@ -1,0 +1,36 @@
+name: Deploy to Portfolio
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout tennisim repo
+        uses: actions/checkout@v3
+        
+      - name: Clone portfolio repo
+        run: |
+          git clone https://kamalmaharjan:${{ secrets.DEPLOY_TOKEN }}@github.com/kamalmaharjan/kamalmaharjan.github.io.git portfolio-repo
+          
+      - name: Copy tennisim files to portfolio
+        run: |
+          rm -rf portfolio-repo/tennisim
+          mkdir -p portfolio-repo/tennisim
+          cp -r . portfolio-repo/tennisim/
+          # Remove git files
+          rm -rf portfolio-repo/tennisim/.git
+          rm -rf portfolio-repo/tennisim/.github
+          
+      - name: Commit and push to portfolio
+        run: |
+          cd portfolio-repo
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add tennisim/
+          git commit -m "Auto-update tennisim from main repo" || echo "No changes to commit"
+          git push origin main
