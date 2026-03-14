@@ -79,11 +79,8 @@
           </div>
 
           <h3>Court (click to set)</h3>
-          <p class="muted">Click once for server position, then click to set a target in the service box.</p>
+          <p class="muted">Click your side (baseline half) to set the server position. Click the opponent service box to set the target.</p>
           <div class="modebar">
-            <button type="button" class="modebtn active" id="modeServer">Set server position</button>
-            <button type="button" class="modebtn" id="modeTarget">Set serve target</button>
-            <span class="spacer"></span>
             <button type="button" class="subbtn" id="openHistory">History</button>
             <button type="button" class="subbtn" id="clearHistory">Clear runs</button>
           </div>
@@ -286,6 +283,11 @@
         const COURT_W_M = 8.23;
         const COURT_L_M = 23.77;
 
+        // Visual tweak: the photo mapping isn't perfectly linear in y,
+        // so the service-box outline can appear slightly "too high".
+        // Extend the box downward a bit to meet the painted service line.
+        const SERVICE_BOX_Y_EXTRA_FRAC = 0.010; // fraction of rendered image height
+
         // Fallback insets if auto-detection fails.
         // Values are fractions of the rendered image size.
         const INSET_FALLBACK = { left: 0.0, right: 0.0, top: 0.0, bottom: 0.0 };
@@ -304,23 +306,11 @@
         const targetXInput = document.getElementById('target_x_m');
         const targetYInput = document.getElementById('target_y_m');
 
-        const modeServerBtn = document.getElementById('modeServer');
-        const modeTargetBtn = document.getElementById('modeTarget');
-
         let selectedRunId = null;
 
-        let mode = 'server';
         let courtBounds = null; // { left, right, top, bottom } in [0..1]
         let courtCenterXFrac = 0.5; // image-relative x of the center service line
         let draggingServer = false;
-
-        function setMode(nextMode) {
-          mode = nextMode;
-          modeServerBtn.classList.toggle('active', mode === 'server');
-          modeTargetBtn.classList.toggle('active', mode === 'target');
-        }
-        modeServerBtn.addEventListener('click', () => setMode('server'));
-        modeTargetBtn.addEventListener('click', () => setMode('target'));
 
         function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
@@ -901,7 +891,8 @@
           const w = Math.abs(p2.x - p1.x);
           const h = Math.abs(p2.y - p1.y);
           const widenPx = 3;
-          ctx.strokeRect(x0 - widenPx, y0, w + 2 * widenPx, h);
+          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
+          ctx.strokeRect(x0 - widenPx, y0, w + 2 * widenPx, h + yExtra);
 
           const serverX = parseFloat(serverXInput.value);
           if (Number.isFinite(serverX)) {
@@ -981,16 +972,36 @@
         }
 
         function setTargetFromPointer(ev) {
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
-          if (!p) return;
           const side = inferSideFromServerX();
           const box = serviceBoxBounds(side);
-          // Clickbox is EXACTLY the singles service box; ignore clicks outside.
-          if (p.x_m < box.xMin || p.x_m > box.xMax || p.y_m < box.yMin || p.y_m > box.yMax) {
-            return;
-          }
-          targetXInput.value = p.x_m.toFixed(3);
-          targetYInput.value = p.y_m.toFixed(3);
+
+          // Only accept target clicks within the (visually adjusted) singles service box.
+          // We do this check in image-pixel space so it matches the drawn grey outline.
+          const rect = img.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const p1 = courtMetersToImg(box.xMin, box.yMin);
+          const p2 = courtMetersToImg(box.xMax, box.yMax);
+          const x0 = Math.min(p1.x, p2.x);
+          const y0 = Math.min(p1.y, p2.y);
+          const w = Math.abs(p2.x - p1.x);
+          const h = Math.abs(p2.y - p1.y);
+          const widenPx = 3;
+          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
+          const insideBox = (
+            x >= (x0 - widenPx) && x <= (x0 + w + widenPx) &&
+            y >= y0 && y <= (y0 + h + yExtra)
+          );
+          if (!insideBox) return;
+
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+
+          // Clamp to physical service-box bounds so the backend stays consistent.
+          const cx = clamp(p.x_m, box.xMin, box.xMax);
+          const cy = clamp(p.y_m, box.yMin, box.yMax);
+          targetXInput.value = cx.toFixed(3);
+          targetYInput.value = cy.toFixed(3);
           inferPlacementFromTarget(side);
           draw();
         }
@@ -1011,7 +1022,15 @@
             }
           }
 
-          if (mode === 'server') {
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+
+          // Intuitive click routing:
+          // - Your side (near baseline half): sets / drags server position
+          // - Opponent side (far half): sets target (only if inside service box)
+          if (p.y_m <= (COURT_L_M / 2.0)) {
+            draggingServer = true;
+            try { canvas.setPointerCapture(ev.pointerId); } catch {}
             setServerFromPointer(ev);
           } else {
             setTargetFromPointer(ev);
