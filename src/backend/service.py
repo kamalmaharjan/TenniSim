@@ -71,6 +71,12 @@ class Service:
     AIR_DENSITY = 1.225
     DRAG_COEFF = 0.55
 
+    # Bounce (court contact) coefficients.
+    # These are tuned for visually plausible tennis bounces rather than surface-specific calibration.
+    BOUNCE_RESTITUTION_Z = 0.65
+    BOUNCE_FRICTION_COEFF = 0.55
+    BOUNCE_SPIN_DAMP = 0.85
+
     def __init__(self, player: Player | None = None, court: Court | None = None):
         self.player = player
         self.court = court
@@ -360,8 +366,17 @@ class Service:
         *,
         dt: float = 0.002,
         t_max: float = 3.0,
+        record_path_xy: bool = False,
+        path_stride_steps: int = 10,
+        max_path_points: int = 260,
+        simulate_bounce_after: bool = False,
+        t_after_max: float = 1.2,
     ) -> dict:
-        """Simulate until first ground contact (z<=0). Returns summary."""
+        """Simulate until first ground contact (z<=0). Returns summary.
+
+        When `record_path_xy` is True, includes a downsampled top-down path
+        as `path_xy`: a list of [x_m, y_m] points.
+        """
         x = float(pos0[0])
         y = float(pos0[1])
         z = float(pos0[2])
@@ -372,11 +387,23 @@ class Service:
         wy = float(omega[1])
         wz = float(omega[2])
 
+        path_xy: list[list[float]] | None = None
+        if record_path_xy:
+            stride = int(path_stride_steps)
+            stride = 1 if stride < 1 else stride
+            limit = int(max_path_points)
+            limit = 10 if limit < 10 else limit
+            path_xy = [[float(x), float(y)]]
+        else:
+            stride = 1
+            limit = 0
+
         net_y = float(self._net_y())
         net_crossed = False
         net_clearance: float | None = None
 
         t = 0.0
+        step_i = 0
 
         while t < float(t_max):
             prev_x, prev_y, prev_z = x, y, z
@@ -391,6 +418,10 @@ class Service:
             y += vy * dt
             z += vz * dt
             t += dt
+            step_i += 1
+
+            if path_xy is not None and (step_i % stride) == 0 and len(path_xy) < limit:
+                path_xy.append([float(x), float(y)])
 
             # Net plane crossing interpolation
             if (not net_crossed) and (prev_y <= net_y <= y):
@@ -407,23 +438,148 @@ class Service:
                 alpha = 0.0 if abs(float(dz)) < 1e-12 else (0.0 - prev_z) / dz
                 x_land = float(prev_x + alpha * (x - prev_x))
                 y_land = float(prev_y + alpha * (y - prev_y))
+
+                # Approximate impact velocity at the contact interpolation point.
+                # Linear interpolation is adequate at small dt.
+                vx_imp = float(prev_vx + alpha * (vx - prev_vx))
+                vy_imp = float(prev_vy + alpha * (vy - prev_vy))
+                vz_imp = float(prev_vz + alpha * (vz - prev_vz))
+
                 final_speed = math.sqrt((prev_vx * prev_vx) + (prev_vy * prev_vy) + (prev_vz * prev_vz))
-                return {
+                out = {
                     "t_land": float(t),
                     "landing": np.array([x_land, y_land], dtype=float),
                     "net_clearance": float(net_clearance) if net_clearance is not None else float("nan"),
                     "net_crossed": bool(net_crossed),
                     "final_speed": float(final_speed),
                 }
+                if path_xy is not None:
+                    if len(path_xy) == 0 or (path_xy[-1][0] != float(x_land) or path_xy[-1][1] != float(y_land)):
+                        path_xy.append([float(x_land), float(y_land)])
+                    out["path_xy"] = path_xy
+
+                # Optional: simulate the post-bounce segment (2nd flight) with a simple
+                # impulse-based bounce (restitution + Coulomb friction + spin coupling).
+                if simulate_bounce_after:
+                    m = float(self.BALL_MASS_KG)
+                    R = float(self.BALL_RADIUS_M)
+                    # Solid sphere inertia.
+                    I = (2.0 / 5.0) * m * (R * R)
+
+                    e = float(self.BOUNCE_RESTITUTION_Z)
+                    mu = float(self.BOUNCE_FRICTION_COEFF)
+                    spin_damp = float(self.BOUNCE_SPIN_DAMP)
+
+                    # Normal impulse (z): reflect with restitution.
+                    vz_in = float(vz_imp)
+                    if vz_in > 0.0:
+                        vz_in = -abs(vz_in)
+                    Jn = -(1.0 + e) * m * vz_in  # >= 0
+                    vz_out = -e * vz_in
+
+                    # Tangential friction impulse with spin coupling.
+                    # Relative tangential velocity at the contact point (ground frame):
+                    # v_rel = v_t + (omega x r)_t, where r = (0,0,-R).
+                    vrel_x = float(vx_imp + (wy * R))
+                    vrel_y = float(vy_imp - (wx * R))
+                    vrel_mag = math.hypot(vrel_x, vrel_y)
+
+                    Jtx = 0.0
+                    Jty = 0.0
+                    if vrel_mag > 1e-9 and Jn > 0.0:
+                        ux = vrel_x / vrel_mag
+                        uy = vrel_y / vrel_mag
+
+                        # Impulse required to bring slip to ~0 (no-slip) for a sphere:
+                        # v_rel' = v_rel + J_t*(1/m + R^2/I)
+                        # => J_req = -v_rel / (1/m + R^2/I)
+                        denom = (1.0 / m) + ((R * R) / I)
+                        J_req = vrel_mag / denom
+
+                        # Coulomb friction limit
+                        J_max = mu * Jn
+                        J_t_mag = min(J_req, J_max)
+
+                        # Friction impulse opposes slip
+                        Jtx = -J_t_mag * ux
+                        Jty = -J_t_mag * uy
+
+                    # Apply impulses to linear velocity
+                    vx_out = float(vx_imp + (Jtx / m))
+                    vy_out = float(vy_imp + (Jty / m))
+
+                    # Apply impulses to angular velocity (about center): omega' = omega + (r x J)/I
+                    # r = (0,0,-R), J = (Jtx, Jty, 0) => r x J = (R*Jty, -R*Jtx, 0)
+                    wx_out = float((wx + (R * Jty) / I) * spin_damp)
+                    wy_out = float((wy + (-R * Jtx) / I) * spin_damp)
+                    wz_out = float(wz * spin_damp)
+
+                    x2 = float(x_land)
+                    y2 = float(y_land)
+                    z2 = 0.001
+                    vx2 = float(vx_out)
+                    vy2 = float(vy_out)
+                    vz2 = float(vz_out)
+
+                    # Use the post-bounce spin for post-bounce flight curvature.
+                    wx2 = float(wx_out)
+                    wy2 = float(wy_out)
+                    wz2 = float(wz_out)
+
+                    path_xy_post: list[list[float]] | None = None
+                    if record_path_xy:
+                        path_xy_post = [[float(x2), float(y2)]]
+                    t2 = 0.0
+                    step2 = 0
+
+                    while t2 < float(t_after_max):
+                        px, py, pz = x2, y2, z2
+                        pvx, pvy, pvz = vx2, vy2, vz2
+
+                        ax2, ay2, az2 = self._forces_accel_components(vx2, vy2, vz2, wx2, wy2, wz2)
+                        vx2 += ax2 * dt
+                        vy2 += ay2 * dt
+                        vz2 += az2 * dt
+                        x2 += vx2 * dt
+                        y2 += vy2 * dt
+                        z2 += vz2 * dt
+                        t2 += dt
+                        step2 += 1
+
+                        if path_xy_post is not None and (step2 % stride) == 0 and len(path_xy_post) < limit:
+                            path_xy_post.append([float(x2), float(y2)])
+
+                        if z2 <= 0.0 and t2 > 0.05:
+                            dz2 = (z2 - pz)
+                            alpha2 = 0.0 if abs(float(dz2)) < 1e-12 else (0.0 - pz) / dz2
+                            x_land2 = float(px + alpha2 * (x2 - px))
+                            y_land2 = float(py + alpha2 * (y2 - py))
+                            out["t_land2"] = float(t + t2)
+                            out["landing2"] = np.array([x_land2, y_land2], dtype=float)
+                            if path_xy_post is not None:
+                                if len(path_xy_post) == 0 or (path_xy_post[-1][0] != float(x_land2) or path_xy_post[-1][1] != float(y_land2)):
+                                    path_xy_post.append([float(x_land2), float(y_land2)])
+                                out["path_xy_post"] = path_xy_post
+                            break
+                    else:
+                        # Time ran out before 2nd contact.
+                        out["t_land2"] = float("nan")
+                        out["landing2"] = np.array([float("nan"), float("nan")], dtype=float)
+                        if path_xy_post is not None:
+                            out["path_xy_post"] = path_xy_post
+                return out
 
         final_speed = math.sqrt((vx * vx) + (vy * vy) + (vz * vz))
-        return {
+        out = {
             "t_land": float("nan"),
             "landing": np.array([float("nan"), float("nan")], dtype=float),
             "net_clearance": float("nan"),
             "net_crossed": bool(net_crossed),
             "final_speed": float(final_speed),
         }
+        if path_xy is not None:
+            out["path_xy"] = path_xy
+        return out
 
     def simulate_serve(
         self,
@@ -439,6 +595,7 @@ class Service:
         spin_rpm: float,
         spin_axis_unit: tuple[float, float, float],
         launch_speed_factor: float | None = None,
+        return_path_xy: bool = False,
     ) -> dict:
         """Run one forward simulation from UI-selected parameters.
 
@@ -477,7 +634,13 @@ class Service:
         axis = axis / axis_norm if axis_norm > 1e-9 else np.zeros(3, dtype=float)
         omega = omega_mag * axis
 
-        sim = self._simulate(contact, vel0, omega)
+        sim = self._simulate(
+            contact,
+            vel0,
+            omega,
+            record_path_xy=bool(return_path_xy),
+            simulate_bounce_after=bool(return_path_xy),
+        )
         sim["contact_point_m"] = (float(contact[0]), float(contact[1]), float(contact[2]))
         sim["launch_speed_mps"] = float(launch_speed)
         sim["side"] = side
@@ -642,15 +805,20 @@ class Service:
                             omega = np.zeros(3, dtype=float)
                             spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
                         else:
-                            # Spin axis selection (handedness-free heuristic):
-                            # - Slice: omega ~ +z (gives lateral Magnus). Sign depends on side.
-                            # - Topspin: omega ~ -x (gives downward Magnus).
+                            # Spin axis selection (heuristic):
+                            # - Slice: omega ~ +z (lateral Magnus; keep same on-screen direction across sides).
+                            # - Topspin: omega ~ -x (downward Magnus).
+                            # - Flat: small topspin by default (also -x) so nonzero RPM actually has an effect.
                             if spin_type == "slice":
-                                spin_axis = np.array([0.0, 0.0, -1.0 if side == "deuce" else 1.0], dtype=float)
+                                # With +y into the court and +x to server's right:
+                                # omega(+z) x v(+y) -> -x (curves left on the diagram).
+                                # Per UI preference: keep slice curvature direction the same on-screen
+                                # regardless of side.
+                                spin_axis = np.array([0.0, 0.0, 1.0], dtype=float)
                             elif spin_type == "topspin":
                                 spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
                             else:
-                                spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
+                                spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
                             omega = omega_mag * spin_axis
 
                         sim = self._simulate(contact, vel0, omega)
@@ -746,11 +914,11 @@ class Service:
                                 spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
                             else:
                                 if spin_type == "slice":
-                                    spin_axis = np.array([0.0, 0.0, -1.0 if side == "deuce" else 1.0], dtype=float)
+                                    spin_axis = np.array([0.0, 0.0, 1.0], dtype=float)
                                 elif spin_type == "topspin":
                                     spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
                                 else:
-                                    spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
+                                    spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
                                 omega = omega_mag * spin_axis
 
                             sim = self._simulate(contact, vel0, omega)

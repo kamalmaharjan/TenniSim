@@ -283,6 +283,7 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 		spin_rpm=float(best.spin_rpm),
 		spin_axis_unit=best.spin_axis_unit,
 		launch_speed_factor=launch_speed_factor,
+		return_path_xy=True,
 	)
 
 	# Variance: run a small Monte Carlo ensemble around the optimized serve.
@@ -313,13 +314,22 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 			spin_rpm=spin_rpm,
 			spin_axis_unit=best.spin_axis_unit,
 			launch_speed_factor=speed_fac,
+			return_path_xy=True,
 		)
 		sim_samples.append(
 			{
 				"landing": [float(s["landing"][0]), float(s["landing"][1])],
+				"landing2": (
+					None
+					if s.get("landing2") is None
+					else [float(s["landing2"][0]), float(s["landing2"][1])]
+				),
 				"net_crossed": bool(s.get("net_crossed")),
 				"net_clearance": float(s.get("net_clearance", float("nan"))),
 				"t_land": float(s.get("t_land", float("nan"))),
+				"t_land2": float(s.get("t_land2", float("nan"))),
+				"path_xy": s.get("path_xy"),
+				"path_xy_post": s.get("path_xy_post"),
 			}
 		)
 
@@ -361,8 +371,13 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 		"input": dict(payload),
 		"best": asdict(best),
 		"sim": {
-			**{k: v for k, v in sim.items() if k != "landing"},
+			**{k: v for k, v in sim.items() if k not in {"landing", "landing2"}},
 			"landing": [float(sim["landing"][0]), float(sim["landing"][1])],
+			"landing2": (
+				None
+				if sim.get("landing2") is None
+				else [float(sim["landing2"][0]), float(sim["landing2"][1])]
+			),
 		},
 		"sim_samples": sim_samples,
 		"sim_stats": sim_stats,
