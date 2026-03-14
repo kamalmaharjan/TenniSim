@@ -17,6 +17,9 @@
       .court-wrap { position: relative; width: 100%; max-width: 520px; }
       .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
       .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+      .side-wrap { width: 100%; max-width: 520px; margin-top: 10px; }
+      .side-canvas { width: 100%; height: 220px; display: block; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
+      .side-info { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
       .modebar { display: flex; gap: 8px; margin: 10px 0 8px; }
       .modebtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
       .modebtn.active { border-color: #111; }
@@ -50,6 +53,7 @@
         .kv { grid-template-columns: 120px 1fr; }
         input, select { max-width: none; }
         .grid > div { max-width: none; }
+        .side-info { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -97,7 +101,14 @@
             <canvas id="courtCanvas" class="court-canvas" role="img" aria-label="Interactive tennis court" aria-describedby="courtHelp">Interactive tennis court canvas</canvas>
           </div>
 
-          <div id="selectedMeta" class="meta muted" role="status" aria-live="polite" aria-atomic="true">Click an orange dot to select a past run.</div>
+          <div class="side-wrap" aria-label="Side profile trajectory">
+            <div class="muted" style="margin: 6px 0 6px;">Side profile (distance into court y vs height z)</div>
+            <canvas id="sideCanvas" class="side-canvas" role="img" aria-label="Ball side profile trajectory">Side profile canvas</canvas>
+            <div class="side-info" aria-label="Side profile details">
+              <div id="sideMetrics" class="meta muted" style="white-space: pre-wrap;" role="status" aria-live="polite" aria-atomic="true"></div>
+              <div id="selectedMeta" class="meta muted" role="status" aria-live="polite" aria-atomic="true">Click an orange dot to select a past run.</div>
+            </div>
+          </div>
 
           <input type="hidden" name="target_x_m" id="target_x_m" value="" />
           <input type="hidden" name="target_y_m" id="target_y_m" value="" />
@@ -287,6 +298,10 @@
         const canvas = document.getElementById('courtCanvas');
         const ctx = canvas.getContext('2d');
 
+        const sideCanvas = document.getElementById('sideCanvas');
+        const sideCtx = sideCanvas ? sideCanvas.getContext('2d') : null;
+        const sideMetricsEl = document.getElementById('sideMetrics');
+
         const selectedMeta = document.getElementById('selectedMeta');
         const openHistoryBtn = document.getElementById('openHistory');
         const clearHistoryBtn = document.getElementById('clearHistory');
@@ -352,6 +367,16 @@
           canvas.width = Math.round(rect.width * dpr);
           canvas.height = Math.round(rect.height * dpr);
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          draw();
+        }
+
+        function sideCanvasResizeToElement() {
+          if (!sideCanvas || !sideCtx) return;
+          const rect = sideCanvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          sideCanvas.width = Math.max(1, Math.round(rect.width * dpr));
+          sideCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+          sideCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
           draw();
         }
 
@@ -642,6 +667,262 @@
           ctx.restore();
         }
 
+        function drawTrajectoryPathYZ(pathYZ, strokeStyle, width, dash, toPx) {
+          if (!sideCtx || !sideCanvas) return;
+          if (!Array.isArray(pathYZ) || pathYZ.length < 2) return;
+
+          // Fallback mapper if not provided.
+          let mapper = toPx;
+          if (typeof mapper !== 'function') {
+            const rect = sideCanvas.getBoundingClientRect();
+            let yMax = 1.0;
+            let zMax = 1.0;
+            for (const p of pathYZ) {
+              if (!Array.isArray(p) || p.length < 2) continue;
+              const y = Number(p[0]);
+              const z = Number(p[1]);
+              if (Number.isFinite(y)) yMax = Math.max(yMax, y);
+              if (Number.isFinite(z)) zMax = Math.max(zMax, z);
+            }
+            yMax = Math.max(yMax, (COURT_L_M / 2.0) + 2.0);
+            zMax = Math.max(zMax, 1.2);
+            const pad = 24;
+            const w = rect.width;
+            const h = rect.height;
+            const plotW = Math.max(1, w - 2 * pad);
+            const plotH = Math.max(1, h - 2 * pad);
+            mapper = (y_m, z_m) => {
+              const x = pad + (y_m / Math.max(1e-9, yMax)) * plotW;
+              const y = (h - pad) - (z_m / Math.max(1e-9, zMax)) * plotH;
+              return { x, y };
+            };
+          }
+
+          sideCtx.save();
+          sideCtx.strokeStyle = strokeStyle;
+          sideCtx.lineWidth = width;
+          sideCtx.lineJoin = 'round';
+          sideCtx.lineCap = 'round';
+          try { sideCtx.setLineDash(Array.isArray(dash) ? dash : []); } catch {}
+
+          let started = false;
+          for (const p of pathYZ) {
+            if (!Array.isArray(p) || p.length < 2) continue;
+            const y_m = Number(p[0]);
+            const z_m = Number(p[1]);
+            if (!Number.isFinite(y_m) || !Number.isFinite(z_m)) continue;
+            const q = mapper(y_m, z_m);
+            if (!started) { sideCtx.beginPath(); sideCtx.moveTo(q.x, q.y); started = true; }
+            else { sideCtx.lineTo(q.x, q.y); }
+          }
+          if (started) sideCtx.stroke();
+          sideCtx.restore();
+        }
+
+        function drawSideProfile() {
+          if (!sideCanvas || !sideCtx) return;
+          const rect = sideCanvas.getBoundingClientRect();
+          sideCtx.clearRect(0, 0, rect.width, rect.height);
+
+          function setMetrics(lines) {
+            if (!sideMetricsEl) return;
+            if (!lines) { sideMetricsEl.textContent = ''; return; }
+            if (Array.isArray(lines)) sideMetricsEl.textContent = lines.join('\n');
+            else sideMetricsEl.textContent = String(lines);
+          }
+
+          const pad = 24;
+          const w = rect.width;
+          const h = rect.height;
+
+          // Ground line
+          sideCtx.save();
+          sideCtx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          sideCtx.lineWidth = 1;
+          sideCtx.beginPath();
+          sideCtx.moveTo(pad, h - pad);
+          sideCtx.lineTo(w - pad, h - pad);
+          sideCtx.stroke();
+          sideCtx.restore();
+
+          if (selectedRunIdRef.value === null) {
+            setMetrics('Select a run to see side profile metrics.');
+            return;
+          }
+
+          const pts = getRunHistory();
+          const run = pts.find(p => p && String(p.id) === String(selectedRunIdRef.value));
+          const r = normalizeRunSchema(run) || run;
+          const out = (r && r.outputs && typeof r.outputs === 'object') ? r.outputs : null;
+          const sim = out && out.sim ? out.sim : (r && r.sim ? r.sim : null);
+          const samples = (
+            out && Array.isArray(out.sim_samples) ? out.sim_samples :
+            Array.isArray(r && r.sim_samples) ? r.sim_samples :
+            null
+          );
+
+          const netY = COURT_L_M / 2.0;
+          const netZ = 0.914;
+          const SERVICE_LINE_FROM_NET_M = 6.40;
+          const serviceLineY = netY + SERVICE_LINE_FROM_NET_M;
+
+          let yMax = netY + 3.0;
+          let zMax = Math.max(1.2, netZ);
+          let hasAnyYZ = false;
+          const consume = (path) => {
+            if (!Array.isArray(path) || path.length < 2) return;
+            for (const p of path) {
+              if (!Array.isArray(p) || p.length < 2) continue;
+              const y_m = Number(p[0]);
+              const z_m = Number(p[1]);
+              if (!Number.isFinite(y_m) || !Number.isFinite(z_m)) continue;
+              hasAnyYZ = true;
+              yMax = Math.max(yMax, y_m);
+              zMax = Math.max(zMax, z_m);
+            }
+          };
+          if (sim) { consume(sim.path_yz); consume(sim.path_yz_post); }
+          if (samples && samples.length) {
+            for (const s of samples) { consume(s && s.path_yz); consume(s && s.path_yz_post); }
+          }
+
+          if (!hasAnyYZ) {
+            setMetrics('No side-profile trajectory recorded for this run.');
+            return;
+          }
+
+          // Ensure key court lines are visible.
+          yMax = Math.max(yMax, COURT_L_M);
+          zMax = Math.max(zMax * 1.05, 1.2);
+
+          const plotW = Math.max(1, w - 2 * pad);
+          const plotH = Math.max(1, h - 2 * pad);
+          const toPx = (y_m, z_m) => {
+            const x = pad + (y_m / Math.max(1e-9, yMax)) * plotW;
+            const yy = (h - pad) - (z_m / Math.max(1e-9, zMax)) * plotH;
+            return { x, y: yy };
+          };
+
+          // Reference verticals
+          const drawVLine = (y_m, stroke, label) => {
+            const p = toPx(y_m, 0.0);
+            sideCtx.save();
+            sideCtx.strokeStyle = stroke;
+            sideCtx.lineWidth = 1;
+            sideCtx.beginPath();
+            sideCtx.moveTo(p.x, pad);
+            sideCtx.lineTo(p.x, h - pad);
+            sideCtx.stroke();
+            if (label) {
+              sideCtx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+              sideCtx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+              sideCtx.fillText(label, Math.min(p.x + 4, w - pad - 80), h - 6);
+            }
+            sideCtx.restore();
+          };
+
+          drawVLine(0.0, 'rgba(0, 0, 0, 0.22)', 'baseline');
+          drawVLine(netY, 'rgba(0, 0, 0, 0.18)', 'net');
+          drawVLine(serviceLineY, 'rgba(0, 0, 0, 0.14)', 'service');
+          drawVLine(COURT_L_M, 'rgba(0, 0, 0, 0.16)', 'recv BL');
+
+          // Net
+          sideCtx.save();
+          sideCtx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          sideCtx.lineWidth = 2;
+          const n0 = toPx(netY, 0.0);
+          const n1 = toPx(netY, netZ);
+          sideCtx.beginPath();
+          sideCtx.moveTo(n0.x, n0.y);
+          sideCtx.lineTo(n1.x, n1.y);
+          sideCtx.stroke();
+          sideCtx.restore();
+
+          // Metrics overlay (prefers main sim)
+          const safeNum = (v) => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+          const fmt = (v, d = 2) => (v === null ? '-' : v.toFixed(d));
+
+          const interpZAtY = (path, yQuery) => {
+            if (!Array.isArray(path) || path.length < 2) return null;
+            for (let i = 1; i < path.length; i++) {
+              const a = path[i - 1];
+              const b = path[i];
+              if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) continue;
+              const y0 = Number(a[0]);
+              const z0 = Number(a[1]);
+              const y1 = Number(b[0]);
+              const z1 = Number(b[1]);
+              if (!Number.isFinite(y0) || !Number.isFinite(z0) || !Number.isFinite(y1) || !Number.isFinite(z1)) continue;
+              const lo = Math.min(y0, y1);
+              const hi = Math.max(y0, y1);
+              if (yQuery < lo || yQuery > hi) continue;
+              const den = (y1 - y0);
+              if (Math.abs(den) < 1e-9) return z0;
+              const t = (yQuery - y0) / den;
+              return z0 + t * (z1 - z0);
+            }
+            return null;
+          };
+
+          const maxZInPath = (path) => {
+            if (!Array.isArray(path) || path.length === 0) return null;
+            let mz = null;
+            for (const p of path) {
+              if (!Array.isArray(p) || p.length < 2) continue;
+              const z = Number(p[1]);
+              if (!Number.isFinite(z)) continue;
+              mz = (mz === null) ? z : Math.max(mz, z);
+            }
+            return mz;
+          };
+
+          const zMaxPre = sim ? maxZInPath(sim.path_yz) : null;
+          const zMaxPost = sim ? maxZInPath(sim.path_yz_post) : null;
+          const zAtNet = sim ? interpZAtY(sim.path_yz, netY) : null;
+          const landing = sim && Array.isArray(sim.landing) ? sim.landing : null;
+          const landing2 = sim && Array.isArray(sim.landing2) ? sim.landing2 : null;
+          const yBounce = (landing && landing.length >= 2) ? safeNum(Number(landing[1])) : null;
+          const yBounce2 = (landing2 && landing2.length >= 2) ? safeNum(Number(landing2[1])) : null;
+
+          setMetrics([
+            `max height (pre): ${fmt(zMaxPre)} m`,
+            `height at net:   ${fmt(zAtNet)} m`,
+            `bounce y:        ${fmt(yBounce)} m`,
+            `max height (post): ${fmt(zMaxPost)} m`,
+            `bounce2 y:       ${fmt(yBounce2)} m`,
+          ]);
+
+          // Bounce markers (main sim)
+          const drawDot = (y_m, z_m, fill) => {
+            if (!Number.isFinite(y_m) || !Number.isFinite(z_m)) return;
+            const p = toPx(y_m, z_m);
+            sideCtx.save();
+            sideCtx.fillStyle = fill;
+            sideCtx.beginPath();
+            sideCtx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+            sideCtx.fill();
+            sideCtx.restore();
+          };
+          if (yBounce !== null) drawDot(yBounce, 0.0, 'rgba(0, 0, 0, 0.35)');
+          if (yBounce2 !== null) drawDot(yBounce2, 0.0, 'rgba(0, 0, 0, 0.22)');
+
+          // Samples first
+          if (samples && samples.length) {
+            for (const s of samples) {
+              drawTrajectoryPathYZ(s && s.path_yz, 'rgba(160, 0, 255, 0.10)', 1.25, [], toPx);
+              drawTrajectoryPathYZ(s && s.path_yz_post, 'rgba(160, 0, 255, 0.07)', 1.0, [], toPx);
+            }
+          }
+
+          // Main paths
+          if (sim && Array.isArray(sim.path_yz) && sim.path_yz.length >= 2) {
+            drawTrajectoryPathYZ(sim.path_yz, 'rgba(0, 0, 0, 0.45)', 3.0, [10, 7], toPx);
+          }
+          if (sim && Array.isArray(sim.path_yz_post) && sim.path_yz_post.length >= 2) {
+            drawTrajectoryPathYZ(sim.path_yz_post, 'rgba(0, 0, 0, 0.28)', 2.0, [], toPx);
+          }
+        }
+
         function dist2(ax, ay, bx, by) {
           const dx = ax - bx;
           const dy = ay - by;
@@ -876,6 +1157,9 @@
           const rect = img.getBoundingClientRect();
           ctx.clearRect(0, 0, rect.width, rect.height);
 
+          // Side profile canvas
+          try { drawSideProfile(); } catch {}
+
           const side = inferSideFromServerX();
           const box = serviceBoxBounds(side);
           const p1 = courtMetersToImg(box.xMin, box.yMin);
@@ -1035,12 +1319,13 @@
         function init() {
           detectCourtBoundsFromWhiteLines();
           canvasResizeToImage();
+          sideCanvasResizeToElement();
 
           canvas.addEventListener('pointerdown', onPointerDown);
           canvas.addEventListener('pointermove', onPointerMove);
           canvas.addEventListener('pointerup', onPointerUp);
           canvas.addEventListener('pointercancel', onPointerUp);
-          window.addEventListener('resize', canvasResizeToImage);
+          window.addEventListener('resize', () => { canvasResizeToImage(); sideCanvasResizeToElement(); });
 
           serverXInput.addEventListener('input', draw);
           targetXInput.addEventListener('input', () => { inferPlacementFromTarget(inferSideFromServerX()); draw(); });
@@ -1128,8 +1413,11 @@
             bestKvs.appendChild(kvRow("Aim angles", `az ${fmtNum(best.launch_azimuth_deg, 1)}°, elev ${fmtNum(best.launch_elevation_deg, 1)}°`));
             if (Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
               const to = best.toss_offset_m;
-              const dist = Math.sqrt((to[0]*to[0]) + (to[1]*to[1]) + (to[2]*to[2]));
-              bestKvs.appendChild(kvRow("Toss offset", `lat ${fmtNum(to[0], 2)} m, fwd ${fmtNum(to[1], 2)} m, up ${fmtNum(to[2], 2)} m (dist ${fmtNum(dist, 2)} m)`));
+              const up = Number(to[2]);
+              const fwd = Number(to[1]);
+              const upTxt = `${fmtNum(Math.abs(up), 2)} m high`;
+              const fwdTxt = `${fmtNum(Math.abs(fwd), 2)} m ${fwd >= 0 ? 'in front of' : 'behind'} you`;
+              bestKvs.appendChild(kvRow("Recommended toss", `Recommended toss distance: ${upTxt} and ${fwdTxt}.`));
             }
             bestKvs.appendChild(kvRow("Net clearance", `${fmtNum(best.net_clearance_m, 3)} m`));
             bestKvs.appendChild(kvRow("Margin to lines", `${fmtNum(best.margin_m, 3)} m`));

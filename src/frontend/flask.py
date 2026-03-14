@@ -330,6 +330,8 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 				"t_land2": float(s.get("t_land2", float("nan"))),
 				"path_xy": s.get("path_xy"),
 				"path_xy_post": s.get("path_xy_post"),
+				"path_yz": s.get("path_yz"),
+				"path_yz_post": s.get("path_yz_post"),
 			}
 		)
 

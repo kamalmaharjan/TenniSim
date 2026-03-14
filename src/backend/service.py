@@ -405,8 +405,9 @@ class Service:
     ) -> dict:
         """Simulate until first ground contact (z<=0). Returns summary.
 
-        When `record_path_xy` is True, includes a downsampled top-down path
-        as `path_xy`: a list of [x_m, y_m] points.
+        When `record_path_xy` is True, includes downsampled trajectory paths:
+        - `path_xy`: a list of [x_m, y_m] points (top-down)
+        - `path_yz`: a list of [y_m, z_m] points (side profile)
         """
         x = float(pos0[0])
         y = float(pos0[1])
@@ -419,12 +420,14 @@ class Service:
         wz = float(omega[2])
 
         path_xy: list[list[float]] | None = None
+        path_yz: list[list[float]] | None = None
         if record_path_xy:
             stride = int(path_stride_steps)
             stride = 1 if stride < 1 else stride
             limit = int(max_path_points)
             limit = 10 if limit < 10 else limit
             path_xy = [[float(x), float(y)]]
+            path_yz = [[float(y), float(z)]]
         else:
             stride = 1
             limit = 0
@@ -453,6 +456,8 @@ class Service:
 
             if path_xy is not None and (step_i % stride) == 0 and len(path_xy) < limit:
                 path_xy.append([float(x), float(y)])
+            if path_yz is not None and (step_i % stride) == 0 and len(path_yz) < limit:
+                path_yz.append([float(y), float(z)])
 
             # Net plane crossing interpolation
             if (not net_crossed) and (prev_y <= net_y <= y):
@@ -488,6 +493,11 @@ class Service:
                     if len(path_xy) == 0 or (path_xy[-1][0] != float(x_land) or path_xy[-1][1] != float(y_land)):
                         path_xy.append([float(x_land), float(y_land)])
                     out["path_xy"] = path_xy
+
+                if path_yz is not None:
+                    if len(path_yz) == 0 or (path_yz[-1][0] != float(y_land) or path_yz[-1][1] != 0.0):
+                        path_yz.append([float(y_land), 0.0])
+                    out["path_yz"] = path_yz
 
                 # Optional: simulate the post-bounce segment (2nd flight) with a simple
                 # impulse-based bounce (restitution + Coulomb friction + spin coupling).
@@ -581,8 +591,10 @@ class Service:
                     wz2 = float(wz_out)
 
                     path_xy_post: list[list[float]] | None = None
+                    path_yz_post: list[list[float]] | None = None
                     if record_path_xy:
                         path_xy_post = [[float(x2), float(y2)]]
+                        path_yz_post = [[float(y2), float(z2)]]
                     t2 = 0.0
                     step2 = 0
 
@@ -602,6 +614,8 @@ class Service:
 
                         if path_xy_post is not None and (step2 % stride) == 0 and len(path_xy_post) < limit:
                             path_xy_post.append([float(x2), float(y2)])
+                        if path_yz_post is not None and (step2 % stride) == 0 and len(path_yz_post) < limit:
+                            path_yz_post.append([float(y2), float(z2)])
 
                         if z2 <= 0.0 and t2 > 0.05:
                             dz2 = (z2 - pz)
@@ -614,6 +628,10 @@ class Service:
                                 if len(path_xy_post) == 0 or (path_xy_post[-1][0] != float(x_land2) or path_xy_post[-1][1] != float(y_land2)):
                                     path_xy_post.append([float(x_land2), float(y_land2)])
                                 out["path_xy_post"] = path_xy_post
+                            if path_yz_post is not None:
+                                if len(path_yz_post) == 0 or (path_yz_post[-1][0] != float(y_land2) or path_yz_post[-1][1] != 0.0):
+                                    path_yz_post.append([float(y_land2), 0.0])
+                                out["path_yz_post"] = path_yz_post
                             break
                     else:
                         # Time ran out before 2nd contact.
@@ -621,6 +639,8 @@ class Service:
                         out["landing2"] = np.array([float("nan"), float("nan")], dtype=float)
                         if path_xy_post is not None:
                             out["path_xy_post"] = path_xy_post
+                        if path_yz_post is not None:
+                            out["path_yz_post"] = path_yz_post
                 return out
 
         final_speed = math.sqrt((vx * vx) + (vy * vy) + (vz * vz))
@@ -633,6 +653,8 @@ class Service:
         }
         if path_xy is not None:
             out["path_xy"] = path_xy
+        if path_yz is not None:
+            out["path_yz"] = path_yz
         return out
 
     def simulate_serve(
