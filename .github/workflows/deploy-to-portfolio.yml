@@ -18,13 +18,18 @@ jobs:
           git clone https://kamalmaharjan:${{ secrets.DEPLOY_TOKEN }}@github.com/kamalmaharjan/kamalmaharjan.github.io.git portfolio-repo
           
       - name: Copy tennisim files to portfolio
+        shell: bash
         run: |
-          rm -rf portfolio-repo/tennisim
-          mkdir -p portfolio-repo/tennisim
-          cp -r . portfolio-repo/tennisim/
-          # Remove git files
-          rm -rf portfolio-repo/tennisim/.git
-          rm -rf portfolio-repo/tennisim/.github
+            set -euxo pipefail
+
+            rm -rf portfolio-repo/tennisim
+            mkdir -p portfolio-repo/tennisim
+
+            # Copy the CONTENTS of the tennisim repo into the subfolder
+            rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            tennisim-repo/ portfolio-repo/tennisim/
           
       - name: Commit and push to portfolio
         run: |
