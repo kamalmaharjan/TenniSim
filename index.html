@@ -18,12 +18,8 @@
       .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
       .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
       .modebar { display: flex; gap: 8px; margin: 10px 0 8px; }
-      .modebtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
-      .modebtn.active { border-color: #111; }
-      .modebar .spacer { flex: 1; }
       .modebar .subbtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
       button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #222; color: white; cursor: pointer; }
-      pre { background: #0b0b0b; color: #f3f3f3; padding: 12px; border-radius: 10px; overflow: auto; }
       .error { color: #b00020; white-space: pre-wrap; }
       .muted { color: #666; font-size: 12px; }
       .kvs { display: grid; grid-template-columns: 1fr; gap: 2px; }
@@ -54,12 +50,15 @@
     </style>
   </head>
   <body>
-    <h1>TenniSim</h1>
-    <p class="muted">GitHub Pages UI calling PythonAnywhere API.</p>
+    <header>
+      <h1>TenniSim</h1>
+      <p class="muted">GitHub Pages UI calling PythonAnywhere API.</p>
+    </header>
 
-    <div class="row">
-      <div class="card">
-        <h2>Inputs</h2>
+    <main>
+      <div class="row">
+      <section class="card" aria-labelledby="inputsHeading">
+        <h2 id="inputsHeading">Inputs</h2>
         <form id="optForm">
           <input type="hidden" name="side" id="side" value="deuce" />
           <input type="hidden" name="placement" id="placement" value="wide" />
@@ -80,17 +79,18 @@
           </div>
 
           <h3>Court (click to set)</h3>
-          <p class="muted">Click your side (baseline half) to set the server position. Click the opponent service box to set the target.</p>
+          <p class="muted" id="courtHelp">Click your side (baseline half) to set the server position. Click the opponent service box to set the target.</p>
           <div class="modebar">
             <button type="button" class="subbtn" id="openHistory">History</button>
             <button type="button" class="subbtn" id="clearHistory">Clear runs</button>
           </div>
           <div class="court-wrap">
+            <!-- Relative path works on GitHub Pages under /TenniSim/ -->
             <img id="courtImg" class="court-img" src="imgs/court.jpg" alt="Tennis court" />
-            <canvas id="courtCanvas" class="court-canvas"></canvas>
+            <canvas id="courtCanvas" class="court-canvas" role="img" aria-label="Interactive tennis court" aria-describedby="courtHelp">Interactive tennis court canvas</canvas>
           </div>
 
-          <div id="selectedMeta" class="meta muted">Click an orange dot to select a past run.</div>
+          <div id="selectedMeta" class="meta muted" role="status" aria-live="polite" aria-atomic="true">Click an orange dot to select a past run.</div>
 
           <input type="hidden" name="target_x_m" id="target_x_m" value="" />
           <input type="hidden" name="target_y_m" id="target_y_m" value="" />
@@ -145,15 +145,15 @@
 
           <div class="actions">
             <button id="optBtn" type="submit">Optimize</button>
-            <span id="status" class="muted"></span>
+            <span id="status" class="muted" role="status" aria-live="polite" aria-atomic="true"></span>
           </div>
         </form>
 
-        <p id="err" class="error" style="display:none"></p>
-      </div>
+        <p id="err" class="error" style="display:none" role="alert" aria-live="assertive" aria-atomic="true"></p>
+      </section>
 
-      <div class="card">
-        <h2>Result</h2>
+      <section class="card" aria-labelledby="resultHeading">
+        <h2 id="resultHeading">Result</h2>
         <div id="resultEmpty" class="muted">Run an optimization to see output here.</div>
 
         <div id="resultBlock" style="display:none">
@@ -188,29 +188,30 @@
             </div>
           </div>
         </div>
-      </div>
+      </section>
     </div>
+    </main>
 
-    <dialog id="historyDialog">
+    <dialog id="historyDialog" aria-labelledby="historyTitle" aria-describedby="historyHelp">
       <div class="dlg-head">
-        <strong>Past runs</strong>
+        <strong id="historyTitle">Past runs</strong>
         <button type="button" class="dlg-close" onclick="document.getElementById('historyDialog').close()">Close</button>
       </div>
       <div class="dlg-body">
-        <table>
+        <table aria-label="Past runs">
           <thead>
             <tr>
-              <th>Run ID</th>
-              <th>Time</th>
-              <th>Side</th>
-              <th>Placement</th>
-              <th>Spin</th>
-              <th>Landing</th>
+              <th scope="col">Run ID</th>
+              <th scope="col">Time</th>
+              <th scope="col">Side</th>
+              <th scope="col">Placement</th>
+              <th scope="col">Spin</th>
+              <th scope="col">Landing</th>
             </tr>
           </thead>
           <tbody id="historyBody"></tbody>
         </table>
-        <p class="muted" style="margin: 10px 0 0;">Click a row to select it (dot turns red).</p>
+        <p id="historyHelp" class="muted" style="margin: 10px 0 0;">Click a row to select it (dot turns red).</p>
       </div>
     </dialog>
 
@@ -219,6 +220,7 @@
       const API_BASE = 'https://kamalmaharjan.pythonanywhere.com';
 
       (function () {
+        // ---------- DOM ----------
         const form = document.getElementById('optForm');
         const errEl = document.getElementById('err');
         const statusEl = document.getElementById('status');
@@ -244,6 +246,31 @@
         const targetBlock = document.getElementById('targetBlock');
 
         const el = (id) => document.getElementById(id);
+
+        // ---------- helpers ----------
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+        function showError(msg) {
+          errEl.style.display = msg ? 'block' : 'none';
+          errEl.textContent = msg || '';
+        }
+
+        function setStatus(msg) {
+          statusEl.textContent = msg || '';
+        }
+
+        function formatNum(v, digits) {
+          return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(digits) : '-';
+        }
+
+        function formatSpeed(mps) {
+          if (!(typeof mps === 'number' && Number.isFinite(mps))) return '-';
+          const kmh = mps * 3.6;
+          const mph = mps * 2.2369362920544;
+          return `${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)`;
+        }
+
+        // ---------- court model ----------
         let draggingServer = false;
         let selectedRunId = null;
 
@@ -251,28 +278,11 @@
         const COURT_L_M = 23.77;
 
         const SERVICE_BOX_Y_EXTRA_FRAC = 0.010; // fraction of rendered image height
-        // Fallback insets if auto-detection fails.
-        // Values are fractions of the rendered image size.
         const INSET_FALLBACK = { left: 0.0, right: 0.0, top: 0.0, bottom: 0.0 };
-          // Only accept target clicks within the (visually adjusted) singles service box.
-          // We do this check in image-pixel space so it matches the drawn grey outline.
-          const rect = img.getBoundingClientRect();
-          const x = ev.clientX - rect.left;
-          const y = ev.clientY - rect.top;
-          const p1 = courtMetersToImg(box.xMin, box.yMin);
-          const p2 = courtMetersToImg(box.xMax, box.yMax);
-          const x0 = Math.min(p1.x, p2.x);
-          const y0 = Math.min(p1.y, p2.y);
-          const w = Math.abs(p2.x - p1.x);
-          const h = Math.abs(p2.y - p1.y);
-          const widenPx = 3;
-          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
-          const insideBox = (
-            x >= (x0 - widenPx) && x <= (x0 + w + widenPx) &&
-            y >= y0 && y <= (y0 + h + yExtra)
-          );
-          if (!insideBox) return;
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+
+        let courtBounds = null; // { left, right, top, bottom } in [0..1]
+        let courtCenterXFrac = 0.5; // image-relative x of the center service line
+
         function canvasResizeToImage() {
           const rect = img.getBoundingClientRect();
           const dpr = window.devicePixelRatio || 1;
@@ -283,9 +293,6 @@
         }
 
         function detectCourtBoundsFromWhiteLines() {
-          // Detect singles-court boundary by locating the most prominent vertical
-          // white lines nearest the center (singles sidelines), and the outer
-          // baselines (top/bottom). Runs once on load on a downscaled copy.
           try {
             const maxW = 520;
             const scale = Math.min(1, maxW / img.naturalWidth);
@@ -348,7 +355,6 @@
             const colS = smooth(col, 9);
             const rowAllS = smooth(rowAll, 11);
 
-            // Vertical lines: choose the strongest peaks closest to center
             const colMax = Math.max(...colS);
             const colPeaks = localMaxima(colS, colMax * 0.55);
             const cx = w / 2;
@@ -359,7 +365,6 @@
               if (p.i > cx && (rightX === null || Math.abs(p.i - cx) < Math.abs(rightX - cx))) rightX = p.i;
             }
 
-            // Center service line: strongest peak near the midpoint between singles sidelines.
             if (leftX !== null && rightX !== null) {
               const midX = 0.5 * (leftX + rightX);
               const span = rightX - leftX;
@@ -375,8 +380,6 @@
               courtCenterXFrac = 0.5;
             }
 
-            // Horizontal lines: choose baselines as strongest peaks near top/bottom
-            // Now detect baselines using ONLY the pixels between the singles sidelines.
             const row = new Array(h).fill(0);
             const xL = Math.max(0, Math.min(w - 1, Math.floor(leftX + 2)));
             const xR = Math.max(0, Math.min(w - 1, Math.floor(rightX - 2)));
@@ -394,7 +397,6 @@
             const rowS = smooth(row, 13);
             const rowMax = Math.max(...rowS);
             const rowPeaks = localMaxima(rowS, rowMax * 0.55);
-            // Baselines live near the very top/bottom of the court area.
             let topY = null;
             let bottomY = null;
             for (const p of rowPeaks) {
@@ -406,7 +408,6 @@
               }
             }
 
-            // Fallback: if that didn't work, use the global row peaks.
             if (topY === null || bottomY === null) {
               const rowAllMax = Math.max(...rowAllS);
               const rowAllPeaks = localMaxima(rowAllS, rowAllMax * 0.55);
@@ -422,7 +423,6 @@
               return;
             }
 
-            // Convert to normalized bounds and inset slightly inward.
             const pad = 0.004;
             const left = clamp((leftX / w) + pad, 0, 0.49);
             const right = clamp((1 - (rightX / w)) + pad, 0, 0.49);
@@ -450,10 +450,7 @@
           const uInset = b.left + u * (1 - b.left - b.right);
           const vInset = b.top + v * (1 - b.top - b.bottom);
 
-          return {
-            x: uInset * rect.width,
-            y: vInset * rect.height,
-          };
+          return { x: uInset * rect.width, y: vInset * rect.height };
         }
 
         function imgToCourtMeters(clientX, clientY) {
@@ -469,9 +466,7 @@
             uRaw >= b.left && uRaw <= (1 - b.right) &&
             vRaw >= b.top && vRaw <= (1 - b.bottom)
           );
-          if (!inside) {
-            return null;
-          }
+          if (!inside) return null;
 
           const u = (uRaw - b.left) / (1 - b.left - b.right);
           const v = (vRaw - b.top) / (1 - b.top - b.bottom);
@@ -484,7 +479,7 @@
         }
 
         function inferSideFromServerXValue(serverX) {
-          return (typeof serverX === 'number' && serverX < 0) ? 'ad' : 'deuce';
+          return (typeof serverX === 'number' && Number.isFinite(serverX) && serverX < 0) ? 'ad' : 'deuce';
         }
 
         function inferSideFromServerX() {
@@ -499,10 +494,9 @@
           const yMin = netY;
           const yMax = netY + 6.40;
           const halfW = COURT_W_M / 2.0;
-          if (side === 'deuce') {
-            return { xMin: -halfW, xMax: 0.0, yMin, yMax };
-          }
-          return { xMin: 0.0, xMax: halfW, yMin, yMax };
+          return (side === 'deuce')
+            ? { xMin: -halfW, xMax: 0.0, yMin, yMax }
+            : { xMin: 0.0, xMax: halfW, yMin, yMax };
         }
 
         function inferPlacementFromTargetX(side, tx) {
@@ -523,6 +517,8 @@
           const tx = parseFloat(targetXInput.value);
           const p = inferPlacementFromTargetX(side, tx);
           if (p) placementInput.value = p;
+          else placementInput.value = placementInput.value || 'wide';
+          return placementInput.value;
         }
 
         function drawMarker(x, y, color, r = 6) {
@@ -541,6 +537,7 @@
           return dx * dx + dy * dy;
         }
 
+        // ---------- local storage history ----------
         function getRunHistory() {
           try {
             const raw = localStorage.getItem('runHistory') || '[]';
@@ -557,17 +554,16 @@
 
         function normalizeRunSchema(run) {
           if (!run || typeof run !== 'object') return null;
-
           const r = { ...run };
 
-          function toNum(v) {
+          const toNum = (v) => {
             if (typeof v === 'number' && Number.isFinite(v)) return v;
             if (typeof v === 'string') {
               const n = parseFloat(v);
               return Number.isFinite(n) ? n : null;
             }
             return null;
-          }
+          };
 
           const serverX = toNum(r.server_start_x_m) ?? (r.inputs ? toNum(r.inputs.server_start_x_m) : null);
           const targetX = toNum(r.target_x_m) ?? (r.inputs ? toNum(r.inputs.target_x_m) : null);
@@ -585,18 +581,12 @@
             };
           }
           if (!r.outputs || typeof r.outputs !== 'object') {
-            r.outputs = {
-              best: r.best ?? null,
-              sim: r.sim ?? null,
-            };
+            r.outputs = { best: r.best ?? null, sim: r.sim ?? null };
           }
 
           if (!r.spin_type) r.spin_type = r.inputs.spin_type || (r.outputs.best && r.outputs.best.spin_type) || null;
           if (!r.side) r.side = r.inputs.side || (r.outputs.best && r.outputs.best.side) || null;
           if (!r.placement) r.placement = r.inputs.placement || (r.outputs.best && r.outputs.best.placement) || null;
-          if (toNum(r.server_start_x_m) === null && typeof r.inputs.server_start_x_m === 'number') r.server_start_x_m = r.inputs.server_start_x_m;
-          if (toNum(r.target_x_m) === null && typeof r.inputs.target_x_m === 'number') r.target_x_m = r.inputs.target_x_m;
-          if (toNum(r.target_y_m) === null && typeof r.inputs.target_y_m === 'number') r.target_y_m = r.inputs.target_y_m;
 
           if (!r.side && typeof serverX === 'number') {
             r.side = inferSideFromServerXValue(serverX);
@@ -604,10 +594,7 @@
           }
           if (!r.placement && r.side && typeof targetX === 'number') {
             const p = inferPlacementFromTargetX(r.side, targetX);
-            if (p) {
-              r.placement = p;
-              r.inputs.placement = p;
-            }
+            if (p) { r.placement = p; r.inputs.placement = p; }
           }
 
           if (toNum(r.x_m) === null || toNum(r.y_m) === null) {
@@ -628,7 +615,6 @@
 
           r.best = r.outputs.best;
           r.sim = r.outputs.sim;
-
           return r;
         }
 
@@ -636,39 +622,17 @@
           try {
             const cur = getRunHistory();
             if (!Array.isArray(cur) || cur.length === 0) return;
-            let changed = false;
             const next = [];
             for (const run of cur) {
               const nr = normalizeRunSchema(run);
-              if (!nr) { changed = true; continue; }
-              changed = true;
-              next.push(nr);
+              if (nr) next.push(nr);
             }
-            if (changed) setRunHistory(next);
-          } catch {}
-        }
-
-        function appendLatestRun() {
-          try {
-            const r = window.__latestRun;
-            if (!r || typeof r.x_m !== 'number' || typeof r.y_m !== 'number') return;
-            const arr = getRunHistory();
-            arr.push(r);
-            while (arr.length > 20) arr.shift();
-            setRunHistory(arr);
-
-            selectedRunId = r.id;
-            renderSelectedMeta(r);
-            draw();
+            setRunHistory(next);
           } catch {}
         }
 
         function formatTime(t) {
           try { return new Date(t).toLocaleString(); } catch { return String(t); }
-        }
-
-        function formatNum(v, digits) {
-          return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(digits) : '-';
         }
 
         function renderSelectedMeta(run) {
@@ -678,61 +642,11 @@
             return;
           }
           const r = normalizeRunSchema(run) || run;
-          const inp = r.inputs || {};
-          const out = r.outputs || {};
-          const player = inp.player || {};
-          const racket = inp.racket || {};
-          const best = out.best || r.best || {};
-          const sim = out.sim || r.sim || {};
-          const simStats = out.sim_stats || null;
-          const simSamples = Array.isArray(out.sim_samples) ? out.sim_samples : null;
-
           const lines = [];
           lines.push(`Run: ${r.id || '-'}    Time: ${formatTime(r.t)}`);
           lines.push(`Spin: ${r.spin_type || '-'}    Side: ${r.side || '-'}    Placement: ${r.placement || '-'}`);
           lines.push(`Server start X: ${formatNum(r.server_start_x_m, 2)} m    Target: x ${formatNum(r.target_x_m, 2)} m, y ${formatNum(r.target_y_m, 2)} m`);
-          lines.push(`Player: height ${formatNum(player.height_m, 2)} m, arm ${formatNum(player.arm_span_m, 2)} m, mass ${formatNum(player.body_mass_kg, 1)} kg, jump ${formatNum(player.jump_height_m, 2)} m, swing ${formatNum(player.swing_speed_mps, 1)} m/s`);
-          lines.push(`Racket: ${racket.string_pattern || '-'}, ${formatNum(racket.length_in, 1)} in, ${formatNum(racket.strung_weight_g, 0)} g, HL ${formatNum(racket.head_light_balance_pts, 1)} pts, SW ${formatNum(racket.swing_weight_kgcm2, 0)} kg·cm²`);
           lines.push(`Landing: x ${formatNum(r.x_m, 2)} m, y ${formatNum(r.y_m, 2)} m`);
-
-          if (best && typeof best.launch_speed_mps === 'number') {
-            const kmh = best.launch_speed_mps * 3.6;
-            const mph = best.launch_speed_mps * 2.2369362920544;
-            lines.push(`Best: ${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)    az ${formatNum(best.launch_azimuth_deg, 1)}°    elev ${formatNum(best.launch_elevation_deg, 1)}°    spin ${formatNum(best.spin_rpm, 0)} rpm`);
-          }
-          if (best && Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
-            const to = best.toss_offset_m;
-            const dist = Math.sqrt((to[0]*to[0]) + (to[1]*to[1]) + (to[2]*to[2]));
-            lines.push(`Toss: lat ${formatNum(to[0], 2)} m, fwd ${formatNum(to[1], 2)} m, up ${formatNum(to[2], 2)} m (dist ${formatNum(dist, 2)} m)`);
-          }
-          if (best && (typeof best.net_clearance_m === 'number' || typeof best.margin_m === 'number' || typeof best.score === 'number')) {
-            lines.push(`Safety: net ${formatNum(best.net_clearance_m, 3)} m    margin ${formatNum(best.margin_m, 3)} m    score ${formatNum(best.score, 3)}`);
-          }
-          if (sim && (typeof sim.t_land === 'number' || typeof sim.final_speed === 'number' || typeof sim.net_clearance === 'number')) {
-            const fkmh = (typeof sim.final_speed === 'number') ? (sim.final_speed * 3.6) : null;
-            const fmph = (typeof sim.final_speed === 'number') ? (sim.final_speed * 2.2369362920544) : null;
-            const fStr = (fkmh !== null && fmph !== null) ? `${fkmh.toFixed(0)} km/h (${fmph.toFixed(0)} mph)` : '-';
-            lines.push(`Sim: lands in ${formatNum(sim.t_land, 3)} s    final ${fStr}    net crossed ${sim.net_crossed ? 'yes' : 'no'}    net clr ${formatNum(sim.net_clearance, 3)} m`);
-          }
-
-          if (simStats && Array.isArray(simStats.landing_std) && simStats.landing_std.length === 2) {
-            const sx = simStats.landing_std[0];
-            const sy = simStats.landing_std[1];
-            const pIn = (typeof simStats.p_in_box === 'number' && Number.isFinite(simStats.p_in_box)) ? (simStats.p_in_box * 100) : null;
-            lines.push(`Variance: n ${simStats.n ?? '-'}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m${pIn === null ? '' : `    in-box ${pIn.toFixed(0)}%`}`);
-          } else if (simSamples && simSamples.length) {
-            const pts = simSamples
-              .map(s => (s && Array.isArray(s.landing) && s.landing.length === 2) ? [Number(s.landing[0]), Number(s.landing[1])] : null)
-              .filter(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
-            if (pts.length >= 2) {
-              const xm = pts.reduce((a, p) => a + p[0], 0) / pts.length;
-              const ym = pts.reduce((a, p) => a + p[1], 0) / pts.length;
-              const sx = Math.sqrt(pts.reduce((a, p) => a + ((p[0]-xm)*(p[0]-xm)), 0) / pts.length);
-              const sy = Math.sqrt(pts.reduce((a, p) => a + ((p[1]-ym)*(p[1]-ym)), 0) / pts.length);
-              lines.push(`Variance: n ${pts.length}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m`);
-            }
-          }
-
           selectedMeta.textContent = lines.join('\n');
         }
 
@@ -782,6 +696,7 @@
           draw();
         }
 
+        // ---------- drawing + interaction ----------
         function draw() {
           const rect = img.getBoundingClientRect();
           ctx.clearRect(0, 0, rect.width, rect.height);
@@ -790,6 +705,7 @@
           const box = serviceBoxBounds(side);
           const p1 = courtMetersToImg(box.xMin, box.yMin);
           const p2 = courtMetersToImg(box.xMax, box.yMax);
+
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
           ctx.lineWidth = 3;
           const x0 = Math.min(p1.x, p2.x);
@@ -819,22 +735,6 @@
               if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
               const lp = courtMetersToImg(p.x_m, p.y_m);
               const isSel = (selectedRunId !== null) && (String(p.id) === String(selectedRunId));
-
-              if (isSel) {
-                const out = (p.outputs && typeof p.outputs === 'object') ? p.outputs : null;
-                const samples = out && Array.isArray(out.sim_samples) ? out.sim_samples : null;
-                if (samples) {
-                  for (const s of samples) {
-                    if (!s || !Array.isArray(s.landing) || s.landing.length < 2) continue;
-                    const sx = Number(s.landing[0]);
-                    const sy = Number(s.landing[1]);
-                    if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
-                    const sp = courtMetersToImg(sx, sy);
-                    drawMarker(sp.x, sp.y, 'rgba(210, 0, 0, 0.22)', 3);
-                  }
-                }
-              }
-
               drawMarker(lp.x, lp.y, isSel ? 'rgba(210, 0, 0, 0.92)' : 'rgba(255, 140, 0, 0.92)');
             }
           } catch {}
@@ -851,10 +751,7 @@
             if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
             const lp = courtMetersToImg(p.x_m, p.y_m);
             const d2 = dist2(x, y, lp.x, lp.y);
-            if (d2 < bestD2) {
-              bestD2 = d2;
-              best = p;
-            }
+            if (d2 < bestD2) { bestD2 = d2; best = p; }
           }
           const hitR = 12;
           if (best && bestD2 <= hitR * hitR) {
@@ -869,39 +766,64 @@
           if (!p) return;
           serverXInput.value = p.x_m.toFixed(2);
           const side = inferSideFromServerX();
-          sideInput.value = side;
           inferPlacementFromTarget(side);
           draw();
         }
 
         function setTargetFromPointer(ev) {
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
-          if (!p) return;
           const side = inferSideFromServerX();
           const box = serviceBoxBounds(side);
 
-          // Only accept target clicks strictly within the singles service box.
-          if (p.x_m < box.xMin || p.x_m > box.xMax || p.y_m < box.yMin || p.y_m > box.yMax) {
-            return;
-          }
+          // Pixel-space "inside box" check to match drawn rectangle
+          const rect = img.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const p1 = courtMetersToImg(box.xMin, box.yMin);
+          const p2 = courtMetersToImg(box.xMax, box.yMax);
+          const x0 = Math.min(p1.x, p2.x);
+          const y0 = Math.min(p1.y, p2.y);
+          const w = Math.abs(p2.x - p1.x);
+          const h = Math.abs(p2.y - p1.y);
+          const widenPx = 3;
+          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
+          const insideBox = (
+            x >= (x0 - widenPx) && x <= (x0 + w + widenPx) &&
+            y >= y0 && y <= (y0 + h + yExtra)
+          );
+          if (!insideBox) return;
 
-          targetXInput.value = p.x_m.toFixed(2);
-          targetYInput.value = p.y_m.toFixed(2);
-          sideInput.value = side;
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+
+          const cx = clamp(p.x_m, box.xMin, box.xMax);
+          const cy = clamp(p.y_m, box.yMin, box.yMax);
+          targetXInput.value = cx.toFixed(3);
+          targetYInput.value = cy.toFixed(3);
+
           inferPlacementFromTarget(side);
           draw();
         }
 
         function onPointerDown(ev) {
-          // If clicking a dot, select it.
           if (pickRunAtPointer(ev)) return;
+
+          const serverX = parseFloat(serverXInput.value);
+          if (Number.isFinite(serverX)) {
+            const sp = courtMetersToImg(serverX, 0.0);
+            const rect = img.getBoundingClientRect();
+            const x = ev.clientX - rect.left;
+            const y = ev.clientY - rect.top;
+            if (dist2(x, y, sp.x, sp.y) <= 12 * 12) {
+              draggingServer = true;
+              try { canvas.setPointerCapture(ev.pointerId); } catch {}
+              setServerFromPointer(ev);
+              return;
+            }
+          }
 
           const p = imgToCourtMeters(ev.clientX, ev.clientY);
           if (!p) return;
 
-          // Intuitive click routing:
-          // - Your side (near baseline half): sets / drags server position
-          // - Opponent side (far half): sets target (only if inside service box)
           if (p.y_m <= (COURT_L_M / 2.0)) {
             draggingServer = true;
             try { canvas.setPointerCapture(ev.pointerId); } catch {}
@@ -922,24 +844,10 @@
           try { canvas.releasePointerCapture(ev.pointerId); } catch {}
         }
 
-        function showError(msg) {
-          errEl.style.display = msg ? 'block' : 'none';
-          errEl.textContent = msg || '';
-        }
-
-        function setStatus(msg) {
-          statusEl.textContent = msg || '';
-        }
-
-        function formatSpeed(mps) {
-          if (!(typeof mps === 'number' && Number.isFinite(mps))) return '-';
-          const kmh = mps * 3.6;
-          const mph = mps * 2.2369362920544;
-          return `${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)`;
-        }
-
+        // ---------- result rendering ----------
         function renderResult(payload) {
           if (!payload || !payload.best || !payload.sim) return;
+
           resultEmpty.style.display = 'none';
           resultBlock.style.display = 'block';
 
@@ -967,7 +875,7 @@
             el('r_pred').textContent = '-';
           }
 
-          if (stats && Array.isArray(stats.landing_std)) {
+          if (stats && Array.isArray(stats.landing_std) && stats.landing_std.length === 2) {
             const p = (typeof stats.p_in_box === 'number' && Number.isFinite(stats.p_in_box)) ? (stats.p_in_box * 100).toFixed(0) + '%' : '-';
             el('r_var').textContent = `n ${stats.n ?? '-'}; std x ${formatNum(stats.landing_std[0], 2)} m, y ${formatNum(stats.landing_std[1], 2)} m; in-box ${p}`;
           } else {
@@ -986,7 +894,7 @@
 
           const tx = parseFloat(targetXInput.value);
           const ty = parseFloat(targetYInput.value);
-          if (Number.isFinite(tx) && Number.isFinite(ty) && Array.isArray(best.predicted_landing_m)) {
+          if (Number.isFinite(tx) && Number.isFinite(ty) && Array.isArray(best.predicted_landing_m) && best.predicted_landing_m.length >= 2) {
             targetBlock.style.display = 'block';
             el('r_target').textContent = `x ${formatNum(tx, 2)} m, y ${formatNum(ty, 2)} m`;
             const dx = best.predicted_landing_m[0] - tx;
@@ -997,15 +905,10 @@
           }
         }
 
+        // ---------- api ----------
         function getPayloadFromInputs() {
           const side = inferSideFromServerX();
-          sideInput.value = side;
-          inferPlacementFromTarget(side);
-
-          const placement = placementInput.value || 'wide';
-
-          const tx = targetXInput.value;
-          const ty = targetYInput.value;
+          const placement = inferPlacementFromTarget(side);
 
           const payload = {
             side,
@@ -1024,6 +927,8 @@
             swing_weight_kgcm2: parseFloat(el('swing_weight_kgcm2').value),
           };
 
+          const tx = targetXInput.value;
+          const ty = targetYInput.value;
           if (tx !== '' && ty !== '') {
             const ntx = parseFloat(tx);
             const nty = parseFloat(ty);
@@ -1042,15 +947,18 @@
           optBtn.disabled = true;
           try {
             const payload = getPayloadFromInputs();
+
             const res = await fetch(`${API_BASE}/api/optimize`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
             });
+
             if (!res.ok) {
-              const txt = await res.text();
-              throw new Error(`API error ${res.status}: ${txt}`);
+              const txt = await res.text().catch(() => '');
+              throw new Error(`API error ${res.status}: ${txt || res.statusText}`);
             }
+
             const out = await res.json();
             renderResult(out);
 
@@ -1059,7 +967,7 @@
             const x_m = landing ? Number(landing[0]) : NaN;
             const y_m = landing ? Number(landing[1]) : NaN;
 
-            window.__latestRun = {
+            const run = {
               id: String(Date.now()),
               t: Date.now(),
               inputs: {
@@ -1069,20 +977,6 @@
                 server_start_x_m: payload.server_start_x_m,
                 target_x_m: payload.target_x_m ?? null,
                 target_y_m: payload.target_y_m ?? null,
-                player: {
-                  height_m: payload.height_m,
-                  arm_span_m: payload.arm_span_m,
-                  body_mass_kg: payload.body_mass_kg,
-                  jump_height_m: payload.jump_height_m,
-                  swing_speed_mps: payload.swing_speed_mps,
-                },
-                racket: {
-                  length_in: payload.racket_length_in,
-                  string_pattern: payload.string_pattern,
-                  strung_weight_g: payload.strung_weight_g,
-                  head_light_balance_pts: payload.head_light_balance_pts,
-                  swing_weight_kgcm2: payload.swing_weight_kgcm2,
-                },
               },
               outputs: {
                 best: out.best,
@@ -1102,9 +996,18 @@
               y_m,
             };
 
-            appendLatestRun();
+            const arr = getRunHistory();
+            arr.push(run);
+            while (arr.length > 20) arr.shift();
+            setRunHistory(arr);
+
+            selectedRunId = run.id;
+            renderSelectedMeta(run);
+            draw();
+
             setStatus('Done.');
           } catch (e) {
+            console.error(e);
             showError(String(e && e.message ? e.message : e));
             setStatus('');
           } finally {
@@ -1113,13 +1016,16 @@
           }
         }
 
+        // ---------- init ----------
         function init() {
           detectCourtBoundsFromWhiteLines();
           canvasResizeToImage();
+
           canvas.addEventListener('pointerdown', onPointerDown);
           canvas.addEventListener('pointermove', onPointerMove);
           canvas.addEventListener('pointerup', onPointerUp);
           canvas.addEventListener('pointercancel', onPointerUp);
+
           window.addEventListener('resize', canvasResizeToImage);
           serverXInput.addEventListener('input', draw);
           targetXInput.addEventListener('input', () => { inferPlacementFromTarget(inferSideFromServerX()); draw(); });
@@ -1131,19 +1037,4 @@
           if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', clearAllRuns);
 
           draw();
-        }
-
-        form.addEventListener('submit', (ev) => {
-          ev.preventDefault();
-          void doOptimize();
-        });
-
-        if (img.complete) {
-          init();
-        } else {
-          img.addEventListener('load', init);
-        }
-      })();
-    </script>
-  </body>
-</html>
+       

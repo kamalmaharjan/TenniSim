@@ -54,67 +54,75 @@
     </style>
   </head>
   <body>
-    <h1>TenniSim</h1>
-    <p class="muted">Minimal UI to run the serve optimizer and forward simulation.</p>
+    <header>
+      <h1>TenniSim</h1>
+      <p class="muted">Minimal UI to run the serve optimizer and forward simulation.</p>
+    </header>
 
+    <main>
     <div class="row">
-      <div class="card">
-        <h2>Inputs</h2>
-        <form method="post" action="/">
-          <input type="hidden" name="side" id="side" value="{{ form.side }}" />
-          <input type="hidden" name="placement" id="placement" value="{{ form.placement }}" />
+      <section class="card" aria-labelledby="inputsHeading">
+        <h2 id="inputsHeading">Inputs</h2>
+        <!-- IMPORTANT:
+             GitHub Pages is static, so this form cannot POST to "/" and expect server rendering.
+             Keep method/action for local use, but we intercept submit in JS and call PythonAnywhere API.
+        -->
+        <form id="runForm" method="post" action="/">
+          <input type="hidden" name="side" id="side" value="" />
+          <input type="hidden" name="placement" id="placement" value="" />
           <div class="grid">
             <div>
               <label for="spin_type">Spin type</label>
               <select name="spin_type" id="spin_type">
-                <option value="flat" {% if form.spin_type == 'flat' %}selected{% endif %}>flat</option>
-                <option value="slice" {% if form.spin_type == 'slice' %}selected{% endif %}>slice</option>
-                <option value="topspin" {% if form.spin_type == 'topspin' %}selected{% endif %}>topspin</option>
+                <option value="flat">flat</option>
+                <option value="slice" selected>slice</option>
+                <option value="topspin">topspin</option>
               </select>
             </div>
             <div>
               <label for="server_start_x_m">Server start X (m)</label>
-              <input name="server_start_x_m" id="server_start_x_m" type="number" step="0.01" value="{{ form.server_start_x_m }}" />
+              <input name="server_start_x_m" id="server_start_x_m" type="number" step="0.01" value="0.20" />
             </div>
           </div>
 
           <h3>Court (click to set)</h3>
-          <p class="muted">Click your side (baseline half) to set the server position. Click the opponent service box to set the target.</p>
+          <p class="muted" id="courtHelp">Click your side (baseline half) to set the server position. Click the opponent service box to set the target.</p>
           <div class="modebar">
             <button type="button" class="subbtn" id="openHistory">History</button>
             <button type="button" class="subbtn" id="clearHistory">Clear runs</button>
           </div>
           <div class="court-wrap">
-            <img id="courtImg" class="court-img" src="/imgs/court.jpg" alt="Tennis court" />
-            <canvas id="courtCanvas" class="court-canvas"></canvas>
+            <!-- FIX: use relative URL so it works under /tennisim/ on GitHub Pages -->
+            <img id="courtImg" class="court-img" src="./imgs/court.jpg" alt="Tennis court" />
+            <canvas id="courtCanvas" class="court-canvas" role="img" aria-label="Interactive tennis court" aria-describedby="courtHelp">Interactive tennis court canvas</canvas>
           </div>
 
-          <div id="selectedMeta" class="meta muted">Click an orange dot to select a past run.</div>
+          <div id="selectedMeta" class="meta muted" role="status" aria-live="polite" aria-atomic="true">Click an orange dot to select a past run.</div>
 
-          <input type="hidden" name="target_x_m" id="target_x_m" value="{{ form.target_x_m }}" />
-          <input type="hidden" name="target_y_m" id="target_y_m" value="{{ form.target_y_m }}" />
+          <input type="hidden" name="target_x_m" id="target_x_m" value="" />
+          <input type="hidden" name="target_y_m" id="target_y_m" value="" />
 
           <h3>Player</h3>
           <div class="grid">
             <div>
               <label for="height_m">Height (m)</label>
-              <input name="height_m" id="height_m" type="number" step="0.01" value="{{ form.height_m }}" />
+              <input name="height_m" id="height_m" type="number" step="0.01" value="1.83" />
             </div>
             <div>
               <label for="arm_span_m">Arm span (m)</label>
-              <input name="arm_span_m" id="arm_span_m" type="number" step="0.01" value="{{ form.arm_span_m }}" />
+              <input name="arm_span_m" id="arm_span_m" type="number" step="0.01" value="1.88" />
             </div>
             <div>
               <label for="body_mass_kg">Body mass (kg)</label>
-              <input name="body_mass_kg" id="body_mass_kg" type="number" step="0.1" value="{{ form.body_mass_kg }}" />
+              <input name="body_mass_kg" id="body_mass_kg" type="number" step="0.1" value="" placeholder="optional" />
             </div>
             <div>
               <label for="jump_height_m">Jump height (m)</label>
-              <input name="jump_height_m" id="jump_height_m" type="number" step="0.01" value="{{ form.jump_height_m }}" />
+              <input name="jump_height_m" id="jump_height_m" type="number" step="0.01" value="0.50" />
             </div>
             <div>
               <label for="swing_speed_mps">Swing speed (m/s)</label>
-              <input name="swing_speed_mps" id="swing_speed_mps" type="number" step="0.1" value="{{ form.swing_speed_mps }}" />
+              <input name="swing_speed_mps" id="swing_speed_mps" type="number" step="0.1" value="30.0" />
             </div>
           </div>
 
@@ -122,164 +130,135 @@
           <div class="grid">
             <div>
               <label for="racket_length_in">Length (in)</label>
-              <input name="racket_length_in" id="racket_length_in" type="number" step="0.1" value="{{ form.racket_length_in }}" />
+              <input name="racket_length_in" id="racket_length_in" type="number" step="0.1" value="27.0" />
             </div>
             <div>
               <label for="string_pattern">String pattern</label>
-              <input name="string_pattern" id="string_pattern" type="text" value="{{ form.string_pattern }}" />
+              <input name="string_pattern" id="string_pattern" type="text" value="16x19" />
             </div>
             <div>
               <label for="strung_weight_g">Strung weight (g)</label>
-              <input name="strung_weight_g" id="strung_weight_g" type="number" step="1" value="{{ form.strung_weight_g }}" />
+              <input name="strung_weight_g" id="strung_weight_g" type="number" step="1" value="305" />
             </div>
             <div>
               <label for="head_light_balance_pts">Head light (pts)</label>
-              <input name="head_light_balance_pts" id="head_light_balance_pts" type="number" step="0.1" value="{{ form.head_light_balance_pts }}" />
+              <input name="head_light_balance_pts" id="head_light_balance_pts" type="number" step="0.1" value="4.0" />
             </div>
             <div>
               <label for="swing_weight_kgcm2">Swingweight (kg·cm²)</label>
-              <input name="swing_weight_kgcm2" id="swing_weight_kgcm2" type="number" step="1" value="{{ form.swing_weight_kgcm2 }}" />
+              <input name="swing_weight_kgcm2" id="swing_weight_kgcm2" type="number" step="1" value="320" />
             </div>
           </div>
 
           <div class="actions">
-            <button type="submit">Optimize</button>
+            <button type="submit" id="optimizeBtn">Optimize</button>
+            <span class="muted" id="status" role="status" aria-live="polite" aria-atomic="true"></span>
           </div>
+
+          <p class="error" id="errorBox" style="display:none;" role="alert" aria-live="assertive" aria-atomic="true"></p>
         </form>
+      </section>
 
-        {% if error %}
-          <p class="error">{{ error }}</p>
-        {% endif %}
-      </div>
-
-      <div class="card">
-        <h2>Result</h2>
-        {% if result %}
-          {% set v_ms = result.best['launch_speed_mps'] %}
-          {% set v_kmh = v_ms * 3.6 %}
-          {% set v_mph = v_ms * 2.2369362920544 %}
-          {% set f_ms = result.sim['final_speed'] %}
-          {% set f_kmh = f_ms * 3.6 %}
-          {% set f_mph = f_ms * 2.2369362920544 %}
-          {% set toss = result.best['toss_offset_m'] %}
-          {% set toss_dist = ((toss[0]*toss[0] + toss[1]*toss[1] + toss[2]*toss[2]) ** 0.5) %}
-
+      <section class="card" aria-labelledby="resultHeading">
+        <h2 id="resultHeading">Result</h2>
+        <p class="muted" id="resultHint">Run an optimization to see output here.</p>
+        <div id="resultBox" style="display:none;">
           <div class="section">
             <h3>Recommended serve</h3>
-            <div class="kvs">
-              <div class="kv"><div class="k">Launch speed</div><div class="v">{{ '%.0f'|format(v_kmh) }} km/h ({{ '%.0f'|format(v_mph) }} mph)</div></div>
-              <div class="kv"><div class="k">Aim angles</div><div class="v">az {{ '%.1f'|format(result.best['launch_azimuth_deg']) }}°, elev {{ '%.1f'|format(result.best['launch_elevation_deg']) }}°</div></div>
-              <div class="kv"><div class="k">Toss offset</div><div class="v">lat {{ '%.2f'|format(toss[0]) }} m, fwd {{ '%.2f'|format(toss[1]) }} m, up {{ '%.2f'|format(toss[2]) }} m (dist {{ '%.2f'|format(toss_dist) }} m)</div></div>
-              <div class="kv"><div class="k">Net clearance</div><div class="v">{{ '%.3f'|format(result.best['net_clearance_m']) }} m</div></div>
-              <div class="kv"><div class="k">Margin to lines</div><div class="v">{{ '%.3f'|format(result.best['margin_m']) }} m</div></div>
-              <div class="kv"><div class="k">Predicted landing</div><div class="v">x {{ '%.2f'|format(result.best['predicted_landing_m'][0]) }} m, y {{ '%.2f'|format(result.best['predicted_landing_m'][1]) }} m</div></div>
-            </div>
+            <div class="kvs" id="bestKvs"></div>
           </div>
 
           <div class="section">
             <h3>Simulation (same parameters)</h3>
-            <div class="kvs">
-              <div class="kv"><div class="k">Lands in</div><div class="v">{{ '%.3f'|format(result.sim['t_land']) }} s</div></div>
-              <div class="kv"><div class="k">Final speed</div><div class="v">{{ '%.0f'|format(f_kmh) }} km/h ({{ '%.0f'|format(f_mph) }} mph)</div></div>
-              <div class="kv"><div class="k">Net crossed</div><div class="v">{{ 'yes' if result.sim['net_crossed'] else 'no' }}</div></div>
-              <div class="kv"><div class="k">Landing (sim)</div><div class="v">x {{ '%.2f'|format(result.sim['landing'][0]) }} m, y {{ '%.2f'|format(result.sim['landing'][1]) }} m</div></div>
-            </div>
+            <div class="kvs" id="simKvs"></div>
           </div>
 
-          {% if form.target_x_m != '' and form.target_y_m != '' %}
-            <div class="section">
-              <h3>Target</h3>
-              {% set tx = form.target_x_m|float %}
-              {% set ty = form.target_y_m|float %}
-              {% set lx = result.best['predicted_landing_m'][0] %}
-              {% set ly = result.best['predicted_landing_m'][1] %}
-              {% set dx = lx - tx %}
-              {% set dy = ly - ty %}
-              <div class="kvs">
-                <div class="kv"><div class="k">Clicked target</div><div class="v">x {{ '%.2f'|format(tx) }} m, y {{ '%.2f'|format(ty) }} m</div></div>
-                <div class="kv"><div class="k">Miss distance</div><div class="v">{{ '%.2f'|format(((dx*dx + dy*dy) ** 0.5)) }} m</div></div>
-              </div>
-            </div>
-          {% endif %}
-
-          <script>
-            window.__latestRun = {
-              id: String(Date.now()),
-              t: Date.now(),
-              // Inputs (snapshot)
-              inputs: {
-                spin_type: {{ form.spin_type|tojson }},
-                side: {{ form.side|tojson }},
-                placement: {{ form.placement|tojson }},
-                server_start_x_m: {{ form.server_start_x_m|float }},
-                target_x_m: {{ (form.target_x_m|float) if form.target_x_m != '' else 'null' }},
-                target_y_m: {{ (form.target_y_m|float) if form.target_y_m != '' else 'null' }},
-                player: {
-                  height_m: {{ form.height_m|float }},
-                  arm_span_m: {{ form.arm_span_m|float }},
-                  body_mass_kg: {{ (form.body_mass_kg|float) if form.body_mass_kg != '' else 'null' }},
-                  jump_height_m: {{ form.jump_height_m|float }},
-                  swing_speed_mps: {{ form.swing_speed_mps|float }},
-                },
-                racket: {
-                  length_in: {{ form.racket_length_in|float }},
-                  string_pattern: {{ form.string_pattern|tojson }},
-                  strung_weight_g: {{ form.strung_weight_g|float }},
-                  head_light_balance_pts: {{ form.head_light_balance_pts|float }},
-                  swing_weight_kgcm2: {{ form.swing_weight_kgcm2|float }},
-                },
-              },
-              // Outputs (snapshot)
-              outputs: {
-                best: {{ result.best|tojson }},
-                sim: {{ result.sim|tojson }},
-                sim_samples: {{ result.get('sim_samples')|tojson }},
-                sim_stats: {{ result.get('sim_stats')|tojson }},
-              },
-              // Backward-compatible convenience fields
-              spin_type: {{ form.spin_type|tojson }},
-              side: {{ form.side|tojson }},
-              placement: {{ form.placement|tojson }},
-              server_start_x_m: {{ form.server_start_x_m|float }},
-              target_x_m: {{ (form.target_x_m|float) if form.target_x_m != '' else 'null' }},
-              target_y_m: {{ (form.target_y_m|float) if form.target_y_m != '' else 'null' }},
-              best: {{ result.best|tojson }},
-              sim: {{ result.sim|tojson }},
-              x_m: {{ result.sim['landing'][0] }},
-              y_m: {{ result.sim['landing'][1] }},
-            };
-          </script>
-        {% else %}
-          <p class="muted">Run an optimization to see output here.</p>
-        {% endif %}
-      </div>
+          <div class="section" id="targetSection" style="display:none;">
+            <h3>Target</h3>
+            <div class="kvs" id="targetKvs"></div>
+          </div>
+        </div>
+      </section>
     </div>
 
-    <dialog id="historyDialog">
+    </main>
+
+    <dialog id="historyDialog" aria-labelledby="historyTitle" aria-describedby="historyHelp">
       <div class="dlg-head">
-        <strong>Past runs</strong>
+        <strong id="historyTitle">Past runs</strong>
         <button type="button" class="dlg-close" onclick="document.getElementById('historyDialog').close()">Close</button>
       </div>
       <div class="dlg-body">
-        <table>
+        <table aria-label="Past runs">
           <thead>
             <tr>
-              <th>Run ID</th>
-              <th>Time</th>
-              <th>Side</th>
-              <th>Placement</th>
-              <th>Spin</th>
-              <th>Landing</th>
+              <th scope="col">Run ID</th>
+              <th scope="col">Time</th>
+              <th scope="col">Side</th>
+              <th scope="col">Placement</th>
+              <th scope="col">Spin</th>
+              <th scope="col">Landing</th>
             </tr>
           </thead>
           <tbody id="historyBody"></tbody>
         </table>
-        <p class="muted" style="margin: 10px 0 0;">Click a row to select it (dot turns red).</p>
+        <p id="historyHelp" class="muted" style="margin: 10px 0 0;">Click a row to select it (dot turns red).</p>
       </div>
     </dialog>
 
     <script>
       (function () {
+        // ---------------------------
+        // CONFIG: PythonAnywhere API
+        // ---------------------------
+        // Change this to your API base (no trailing slash), e.g.
+        // const API_BASE = "https://kamalmaharjan.pythonanywhere.com";
+        const API_BASE = "https://kamalmaharjan.pythonanywhere.com";
+
+        // Change this to your endpoint path that runs optimization.
+        // You MUST implement it on PythonAnywhere to accept JSON and return JSON.
+        // Example: POST https://kamalmaharjan.pythonanywhere.com/api/optimize
+        const OPTIMIZE_PATH = "/api/optimize";
+
+        const statusEl = document.getElementById("status");
+        const errorBox = document.getElementById("errorBox");
+
+        function setStatus(msg) {
+          if (!statusEl) return;
+          statusEl.textContent = msg || "";
+        }
+
+        function showError(msg) {
+          if (!errorBox) return;
+          if (!msg) {
+            errorBox.style.display = "none";
+            errorBox.textContent = "";
+            return;
+          }
+          errorBox.style.display = "block";
+          errorBox.textContent = String(msg);
+        }
+
+        function kvRow(k, v) {
+          const div = document.createElement("div");
+          div.className = "kv";
+          div.innerHTML = `<div class="k"></div><div class="v"></div>`;
+          div.querySelector(".k").textContent = k;
+          div.querySelector(".v").textContent = v;
+          return div;
+        }
+
+        function fmtNum(v, digits = 2) {
+          return (typeof v === "number" && Number.isFinite(v)) ? v.toFixed(digits) : "-";
+        }
+
+        function fmtBool(v) {
+          return v ? "yes" : "no";
+        }
+
+        // ---------------------------
+        // Court interaction + history
+        // ---------------------------
         const COURT_W_M = 8.23;
         const COURT_L_M = 23.77;
 
@@ -300,13 +279,16 @@
         const openHistoryBtn = document.getElementById('openHistory');
         const clearHistoryBtn = document.getElementById('clearHistory');
 
+        const formEl = document.getElementById("runForm");
+
         const sideInput = document.getElementById('side');
         const placementInput = document.getElementById('placement');
+        const spinTypeInput = document.getElementById('spin_type');
         const serverXInput = document.getElementById('server_start_x_m');
         const targetXInput = document.getElementById('target_x_m');
         const targetYInput = document.getElementById('target_y_m');
 
-        let selectedRunId = null;
+        const selectedRunIdRef = { value: null };
 
         let courtBounds = null; // { left, right, top, bottom } in [0..1]
         let courtCenterXFrac = 0.5; // image-relative x of the center service line
@@ -343,7 +325,6 @@
         function inferPlacementFromTarget(side) {
           const tx = parseFloat(targetXInput.value);
           if (!Number.isFinite(tx)) {
-            // Default when no target picked yet.
             placementInput.value = placementInput.value || 'wide';
             return placementInput.value || 'wide';
           }
@@ -606,7 +587,6 @@
 
         function normalizeRunSchema(run) {
           if (!run || typeof run !== 'object') return null;
-
           const r = { ...run };
 
           function toNum(v) {
@@ -618,11 +598,9 @@
             return null;
           }
 
-          // Pull commonly-used values from either the legacy top-level or the new inputs object.
           const serverX = toNum(r.server_start_x_m) ?? (r.inputs ? toNum(r.inputs.server_start_x_m) : null);
           const targetX = toNum(r.target_x_m) ?? (r.inputs ? toNum(r.inputs.target_x_m) : null);
 
-          // Ensure inputs/outputs wrappers exist.
           if (!r.inputs || typeof r.inputs !== 'object') {
             r.inputs = {
               spin_type: r.spin_type ?? null,
@@ -636,13 +614,9 @@
             };
           }
           if (!r.outputs || typeof r.outputs !== 'object') {
-            r.outputs = {
-              best: r.best ?? null,
-              sim: r.sim ?? null,
-            };
+            r.outputs = { best: r.best ?? null, sim: r.sim ?? null };
           }
 
-          // Keep top-level convenience fields for table rendering.
           if (!r.spin_type) r.spin_type = r.inputs.spin_type || (r.outputs.best && r.outputs.best.spin_type) || null;
           if (!r.side) r.side = r.inputs.side || (r.outputs.best && r.outputs.best.side) || null;
           if (!r.placement) r.placement = r.inputs.placement || (r.outputs.best && r.outputs.best.placement) || null;
@@ -650,20 +624,15 @@
           if (toNum(r.target_x_m) === null && typeof r.inputs.target_x_m === 'number') r.target_x_m = r.inputs.target_x_m;
           if (toNum(r.target_y_m) === null && typeof r.inputs.target_y_m === 'number') r.target_y_m = r.inputs.target_y_m;
 
-          // Infer side/placement when missing.
           if (!r.side && typeof serverX === 'number') {
             r.side = inferSideFromServerXValue(serverX);
             r.inputs.side = r.side;
           }
           if (!r.placement && r.side && typeof targetX === 'number') {
             const p = inferPlacementFromTargetX(r.side, targetX);
-            if (p) {
-              r.placement = p;
-              r.inputs.placement = p;
-            }
+            if (p) { r.placement = p; r.inputs.placement = p; }
           }
 
-          // Ensure landing coordinates exist.
           if (toNum(r.x_m) === null || toNum(r.y_m) === null) {
             const sim = r.outputs.sim || r.sim;
             const best = r.outputs.best || r.best;
@@ -680,10 +649,8 @@
             }
           }
 
-          // Keep legacy fields aligned.
           r.best = r.outputs.best;
           r.sim = r.outputs.sim;
-
           return r;
         }
 
@@ -691,74 +658,14 @@
           try {
             const cur = getRunHistory();
             if (!Array.isArray(cur) || cur.length === 0) return;
-            let changed = false;
             const next = [];
             for (const run of cur) {
               const nr = normalizeRunSchema(run);
-              if (!nr) { changed = true; continue; }
-              // normalizeRunSchema always returns a new object, so this is always true for well-formed entries.
-              changed = true;
+              if (!nr) continue;
               next.push(nr);
             }
-            if (changed) setRunHistory(next);
+            setRunHistory(next);
           } catch {}
-        }
-
-        function migrateOldLandingHistory() {
-          // Backward compat: older versions stored landingHistory = [{x_m, y_m, t}, ...]
-          try {
-            const oldRaw = localStorage.getItem('landingHistory');
-            if (!oldRaw) return;
-            const old = JSON.parse(oldRaw);
-            if (!Array.isArray(old) || old.length === 0) return;
-            const cur = getRunHistory();
-            if (cur.length > 0) return;
-            const migrated = old
-              .filter(p => p && typeof p.x_m === 'number' && typeof p.y_m === 'number')
-              .map((p, idx) => ({
-                id: String((p.t || Date.now()) + idx),
-                t: typeof p.t === 'number' ? p.t : Date.now(),
-                x_m: p.x_m,
-                y_m: p.y_m,
-                spin_type: null,
-                side: null,
-                placement: null,
-                server_start_x_m: null,
-                target_x_m: null,
-                target_y_m: null,
-                best: null,
-                sim: null,
-              }));
-            setRunHistory(migrated);
-          } catch {}
-        }
-
-        function appendLatestRun() {
-          try {
-            const r = window.__latestRun;
-            if (!r || typeof r.x_m !== 'number' || typeof r.y_m !== 'number') return;
-            const arr = getRunHistory();
-            const last = arr.length ? arr[arr.length - 1] : null;
-            // Avoid only true duplicates (same ID), but allow repeated runs even
-            // when the nominal landing is identical (variance samples can differ).
-            const isDup = last && String(last.id) === String(r.id);
-            if (!isDup) arr.push(r);
-            while (arr.length > 20) arr.shift();
-            setRunHistory(arr);
-
-            // Auto-select the latest run so variance scatter is visible immediately.
-            selectedRunId = r.id;
-            renderSelectedMeta(r);
-            draw();
-          } catch {}
-        }
-
-        function formatTime(t) {
-          try { return new Date(t).toLocaleString(); } catch { return String(t); }
-        }
-
-        function formatNum(v, digits) {
-          return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(digits) : '-';
         }
 
         function renderSelectedMeta(run) {
@@ -768,112 +675,124 @@
             return;
           }
           const r = normalizeRunSchema(run) || run;
-          const inp = r.inputs || {};
-          const out = r.outputs || {};
-          const player = inp.player || {};
-          const racket = inp.racket || {};
-          const best = out.best || r.best || {};
-          const sim = out.sim || r.sim || {};
-          const simStats = out.sim_stats || null;
-          const simSamples = Array.isArray(out.sim_samples) ? out.sim_samples : null;
-
           const lines = [];
-          lines.push(`Run: ${r.id || '-'}    Time: ${formatTime(r.t)}`);
+          lines.push(`Run: ${r.id || '-'}    Time: ${new Date(r.t || Date.now()).toLocaleString()}`);
           lines.push(`Spin: ${r.spin_type || '-'}    Side: ${r.side || '-'}    Placement: ${r.placement || '-'}`);
-          lines.push(`Server start X: ${formatNum(r.server_start_x_m, 2)} m    Target: x ${formatNum(r.target_x_m, 2)} m, y ${formatNum(r.target_y_m, 2)} m`);
-          lines.push(`Player: height ${formatNum(player.height_m, 2)} m, arm ${formatNum(player.arm_span_m, 2)} m, mass ${formatNum(player.body_mass_kg, 1)} kg, jump ${formatNum(player.jump_height_m, 2)} m, swing ${formatNum(player.swing_speed_mps, 1)} m/s`);
-          lines.push(`Racket: ${racket.string_pattern || '-'}, ${formatNum(racket.length_in, 1)} in, ${formatNum(racket.strung_weight_g, 0)} g, HL ${formatNum(racket.head_light_balance_pts, 1)} pts, SW ${formatNum(racket.swing_weight_kgcm2, 0)} kg·cm²`);
-          lines.push(`Landing: x ${formatNum(r.x_m, 2)} m, y ${formatNum(r.y_m, 2)} m`);
-
-          if (best && typeof best.launch_speed_mps === 'number') {
-            const kmh = best.launch_speed_mps * 3.6;
-            const mph = best.launch_speed_mps * 2.2369362920544;
-            lines.push(`Best: ${kmh.toFixed(0)} km/h (${mph.toFixed(0)} mph)    az ${formatNum(best.launch_azimuth_deg, 1)}°    elev ${formatNum(best.launch_elevation_deg, 1)}°    spin ${formatNum(best.spin_rpm, 0)} rpm`);
-          }
-          if (best && Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
-            const to = best.toss_offset_m;
-            const dist = Math.sqrt((to[0]*to[0]) + (to[1]*to[1]) + (to[2]*to[2]));
-            lines.push(`Toss: lat ${formatNum(to[0], 2)} m, fwd ${formatNum(to[1], 2)} m, up ${formatNum(to[2], 2)} m (dist ${formatNum(dist, 2)} m)`);
-          }
-          if (best && (typeof best.net_clearance_m === 'number' || typeof best.margin_m === 'number' || typeof best.score === 'number')) {
-            lines.push(`Safety: net ${formatNum(best.net_clearance_m, 3)} m    margin ${formatNum(best.margin_m, 3)} m    score ${formatNum(best.score, 3)}`);
-          }
-          if (sim && (typeof sim.t_land === 'number' || typeof sim.final_speed === 'number' || typeof sim.net_clearance === 'number')) {
-            const fkmh = (typeof sim.final_speed === 'number') ? (sim.final_speed * 3.6) : null;
-            const fmph = (typeof sim.final_speed === 'number') ? (sim.final_speed * 2.2369362920544) : null;
-            const fStr = (fkmh !== null && fmph !== null) ? `${fkmh.toFixed(0)} km/h (${fmph.toFixed(0)} mph)` : '-';
-            lines.push(`Sim: lands in ${formatNum(sim.t_land, 3)} s    final ${fStr}    net crossed ${sim.net_crossed ? 'yes' : 'no'}    net clr ${formatNum(sim.net_clearance, 3)} m`);
-          }
-
-          if (simStats && Array.isArray(simStats.landing_std) && simStats.landing_std.length === 2) {
-            const sx = simStats.landing_std[0];
-            const sy = simStats.landing_std[1];
-            const pIn = (typeof simStats.p_in_box === 'number' && Number.isFinite(simStats.p_in_box)) ? (simStats.p_in_box * 100) : null;
-            lines.push(`Variance: n ${simStats.n ?? '-'}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m${pIn === null ? '' : `    in-box ${pIn.toFixed(0)}%`}`);
-          } else if (simSamples && simSamples.length) {
-            // Fallback if stats missing
-            const pts = simSamples
-              .map(s => (s && Array.isArray(s.landing) && s.landing.length === 2) ? [Number(s.landing[0]), Number(s.landing[1])] : null)
-              .filter(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
-            if (pts.length >= 2) {
-              const xm = pts.reduce((a, p) => a + p[0], 0) / pts.length;
-              const ym = pts.reduce((a, p) => a + p[1], 0) / pts.length;
-              const sx = Math.sqrt(pts.reduce((a, p) => a + ((p[0]-xm)*(p[0]-xm)), 0) / pts.length);
-              const sy = Math.sqrt(pts.reduce((a, p) => a + ((p[1]-ym)*(p[1]-ym)), 0) / pts.length);
-              lines.push(`Variance: n ${pts.length}    std x ${formatNum(sx, 2)} m, y ${formatNum(sy, 2)} m`);
-            }
-          }
-
+          lines.push(`Server start X: ${fmtNum(r.server_start_x_m, 2)} m    Target: x ${fmtNum(r.target_x_m, 2)} m, y ${fmtNum(r.target_y_m, 2)} m`);
+          lines.push(`Landing: x ${fmtNum(r.x_m, 2)} m, y ${fmtNum(r.y_m, 2)} m`);
           selectedMeta.textContent = lines.join('\n');
         }
 
         function selectRunById(id) {
-          selectedRunId = id;
+          selectedRunIdRef.value = id;
           const arr = getRunHistory();
           const run = arr.find(r => String(r.id) === String(id));
           renderSelectedMeta(run || null);
           draw();
         }
 
-        function openHistoryDialog() {
-          const dlg = document.getElementById('historyDialog');
-          const tbody = document.getElementById('historyBody');
-          if (!dlg || !tbody) return;
+        function pickRunAtPointer(ev) {
+          const rect = img.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const pts = getRunHistory();
+          let best = null;
+          let bestD2 = Infinity;
+          for (const p of pts) {
+            if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
+            const lp = courtMetersToImg(p.x_m, p.y_m);
+            const d2 = dist2(x, y, lp.x, lp.y);
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              best = p;
+            }
+          }
+          const hitR = 12;
+          if (best && bestD2 <= hitR * hitR) {
+            selectRunById(best.id);
+            return true;
+          }
+          return false;
+        }
 
-          const arr = getRunHistory().slice().reverse();
-          tbody.innerHTML = '';
+        function setServerFromPointer(ev) {
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+          serverXInput.value = p.x_m.toFixed(2);
+          const side = inferSideFromServerX();
+          inferPlacementFromTarget(side);
+          draw();
+        }
 
-          for (const run of arr) {
-            const tr = document.createElement('tr');
-            if (selectedRunId !== null && String(run.id) === String(selectedRunId)) tr.classList.add('sel');
-            tr.innerHTML = `
-              <td>${run.id ?? '-'}</td>
-              <td>${formatTime(run.t)}</td>
-              <td>${run.side ?? '-'}</td>
-              <td>${run.placement ?? '-'}</td>
-              <td>${run.spin_type ?? '-'}</td>
-              <td>x ${formatNum(run.x_m, 2)}, y ${formatNum(run.y_m, 2)}</td>
-            `;
-            tr.addEventListener('click', () => {
-              selectRunById(run.id);
-              try { dlg.close(); } catch {}
-            });
-            tbody.appendChild(tr);
+        function setTargetFromPointer(ev) {
+          const side = inferSideFromServerX();
+          const box = serviceBoxBounds(side);
+
+          const rect = img.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const y = ev.clientY - rect.top;
+          const p1 = courtMetersToImg(box.xMin, box.yMin);
+          const p2 = courtMetersToImg(box.xMax, box.yMax);
+          const x0 = Math.min(p1.x, p2.x);
+          const y0 = Math.min(p1.y, p2.y);
+          const w = Math.abs(p2.x - p1.x);
+          const h = Math.abs(p2.y - p1.y);
+          const widenPx = 3;
+          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
+          const insideBox = (
+            x >= (x0 - widenPx) && x <= (x0 + w + widenPx) &&
+            y >= y0 && y <= (y0 + h + yExtra)
+          );
+          if (!insideBox) return;
+
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+
+          const cx = clamp(p.x_m, box.xMin, box.xMax);
+          const cy = clamp(p.y_m, box.yMin, box.yMax);
+          targetXInput.value = cx.toFixed(3);
+          targetYInput.value = cy.toFixed(3);
+          inferPlacementFromTarget(side);
+          draw();
+        }
+
+        function onPointerDown(ev) {
+          if (pickRunAtPointer(ev)) return;
+          const serverX = parseFloat(serverXInput.value);
+          if (Number.isFinite(serverX)) {
+            const sp = courtMetersToImg(serverX, 0.0);
+            const rect = img.getBoundingClientRect();
+            const x = ev.clientX - rect.left;
+            const y = ev.clientY - rect.top;
+            if (dist2(x, y, sp.x, sp.y) <= 12 * 12) {
+              draggingServer = true;
+              try { canvas.setPointerCapture(ev.pointerId); } catch {}
+              setServerFromPointer(ev);
+              return;
+            }
           }
 
-          try { dlg.showModal(); } catch {
-            // Fallback: if dialog unsupported, do nothing.
+          const p = imgToCourtMeters(ev.clientX, ev.clientY);
+          if (!p) return;
+
+          if (p.y_m <= (COURT_L_M / 2.0)) {
+            draggingServer = true;
+            try { canvas.setPointerCapture(ev.pointerId); } catch {}
+            setServerFromPointer(ev);
+          } else {
+            setTargetFromPointer(ev);
           }
         }
 
-        function clearAllRuns() {
-          const ok = window.confirm('Clear all saved runs? This cannot be undone.');
-          if (!ok) return;
-          try { localStorage.removeItem('runHistory'); } catch {}
-          try { localStorage.removeItem('landingHistory'); } catch {}
-          selectedRunId = null;
-          renderSelectedMeta(null);
-          draw();
+        function onPointerMove(ev) {
+          if (!draggingServer) return;
+          setServerFromPointer(ev);
+        }
+
+        function onPointerUp(ev) {
+          if (!draggingServer) return;
+          draggingServer = false;
+          try { canvas.releasePointerCapture(ev.pointerId); } catch {}
         }
 
         function draw() {
@@ -907,178 +826,277 @@
             drawMarker(tp.x, tp.y, 'rgba(0, 170, 60, 0.9)');
           }
 
-          // Landing history (orange dots)
           try {
             const pts = getRunHistory();
             for (const p of pts) {
               if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
               const lp = courtMetersToImg(p.x_m, p.y_m);
-              const isSel = (selectedRunId !== null) && (String(p.id) === String(selectedRunId));
-
-              // If selected, draw its variance scatter (faint) behind the main dot.
-              if (isSel) {
-                const out = (p.outputs && typeof p.outputs === 'object') ? p.outputs : null;
-                const samples = out && Array.isArray(out.sim_samples) ? out.sim_samples : null;
-                if (samples) {
-                  for (const s of samples) {
-                    if (!s || !Array.isArray(s.landing) || s.landing.length < 2) continue;
-                    const sx = Number(s.landing[0]);
-                    const sy = Number(s.landing[1]);
-                    if (!Number.isFinite(sx) || !Number.isFinite(sy)) continue;
-                    const sp = courtMetersToImg(sx, sy);
-                    drawMarker(sp.x, sp.y, 'rgba(210, 0, 0, 0.22)', 3);
-                  }
-                }
-              }
-
+              const isSel = (selectedRunIdRef.value !== null) && (String(p.id) === String(selectedRunIdRef.value));
               drawMarker(lp.x, lp.y, isSel ? 'rgba(210, 0, 0, 0.92)' : 'rgba(255, 140, 0, 0.92)');
             }
           } catch {}
         }
 
-        function pickRunAtPointer(ev) {
-          // If the pointer is near a landing dot, select that run.
-          const rect = img.getBoundingClientRect();
-          const x = ev.clientX - rect.left;
-          const y = ev.clientY - rect.top;
-          const pts = getRunHistory();
-          let best = null;
-          let bestD2 = Infinity;
-          for (const p of pts) {
-            if (!p || typeof p.x_m !== 'number' || typeof p.y_m !== 'number') continue;
-            const lp = courtMetersToImg(p.x_m, p.y_m);
-            const d2 = dist2(x, y, lp.x, lp.y);
-            if (d2 < bestD2) {
-              bestD2 = d2;
-              best = p;
-            }
+        function openHistoryDialog() {
+          const dlg = document.getElementById('historyDialog');
+          const tbody = document.getElementById('historyBody');
+          if (!dlg || !tbody) return;
+
+          const arr = getRunHistory().slice().reverse();
+          tbody.innerHTML = '';
+
+          for (const run of arr) {
+            const tr = document.createElement('tr');
+            if (selectedRunIdRef.value !== null && String(run.id) === String(selectedRunIdRef.value)) tr.classList.add('sel');
+            tr.innerHTML = `
+              <td>${run.id ?? '-'}</td>
+              <td>${new Date(run.t || Date.now()).toLocaleString()}</td>
+              <td>${run.side ?? '-'}</td>
+              <td>${run.placement ?? '-'}</td>
+              <td>${run.spin_type ?? '-'}</td>
+              <td>x ${fmtNum(run.x_m, 2)}, y ${fmtNum(run.y_m, 2)}</td>
+            `;
+            tr.addEventListener('click', () => {
+              selectRunById(run.id);
+              try { dlg.close(); } catch {}
+            });
+            tbody.appendChild(tr);
           }
-          const hitR = 12;
-          if (best && bestD2 <= hitR * hitR) {
-            selectRunById(best.id);
-            return true;
-          }
-          return false;
+
+          try { dlg.showModal(); } catch {}
         }
 
-        function setServerFromPointer(ev) {
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
-          if (!p) return;
-          // Slider behavior: only x matters; y is pinned to baseline.
-          serverXInput.value = p.x_m.toFixed(2);
-          const side = inferSideFromServerX();
-          inferPlacementFromTarget(side);
+        function clearAllRuns() {
+          const ok = window.confirm('Clear all saved runs? This cannot be undone.');
+          if (!ok) return;
+          try { localStorage.removeItem('runHistory'); } catch {}
+          selectedRunIdRef.value = null;
+          renderSelectedMeta(null);
           draw();
         }
 
-        function setTargetFromPointer(ev) {
-          const side = inferSideFromServerX();
-          const box = serviceBoxBounds(side);
+        function appendRun(run) {
+          try {
+            const arr = getRunHistory();
+            arr.push(run);
+            while (arr.length > 20) arr.shift();
+            setRunHistory(arr);
 
-          // Only accept target clicks within the (visually adjusted) singles service box.
-          // We do this check in image-pixel space so it matches the drawn grey outline.
-          const rect = img.getBoundingClientRect();
-          const x = ev.clientX - rect.left;
-          const y = ev.clientY - rect.top;
-          const p1 = courtMetersToImg(box.xMin, box.yMin);
-          const p2 = courtMetersToImg(box.xMax, box.yMax);
-          const x0 = Math.min(p1.x, p2.x);
-          const y0 = Math.min(p1.y, p2.y);
-          const w = Math.abs(p2.x - p1.x);
-          const h = Math.abs(p2.y - p1.y);
-          const widenPx = 3;
-          const yExtra = rect.height * SERVICE_BOX_Y_EXTRA_FRAC;
-          const insideBox = (
-            x >= (x0 - widenPx) && x <= (x0 + w + widenPx) &&
-            y >= y0 && y <= (y0 + h + yExtra)
-          );
-          if (!insideBox) return;
-
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
-          if (!p) return;
-
-          // Clamp to physical service-box bounds so the backend stays consistent.
-          const cx = clamp(p.x_m, box.xMin, box.xMax);
-          const cy = clamp(p.y_m, box.yMin, box.yMax);
-          targetXInput.value = cx.toFixed(3);
-          targetYInput.value = cy.toFixed(3);
-          inferPlacementFromTarget(side);
-          draw();
-        }
-
-        function onPointerDown(ev) {
-          if (pickRunAtPointer(ev)) return;
-          const serverX = parseFloat(serverXInput.value);
-          if (Number.isFinite(serverX)) {
-            const sp = courtMetersToImg(serverX, 0.0);
-            const rect = img.getBoundingClientRect();
-            const x = ev.clientX - rect.left;
-            const y = ev.clientY - rect.top;
-            if (dist2(x, y, sp.x, sp.y) <= 12 * 12) {
-              draggingServer = true;
-              canvas.setPointerCapture(ev.pointerId);
-              setServerFromPointer(ev);
-              return;
-            }
-          }
-
-          const p = imgToCourtMeters(ev.clientX, ev.clientY);
-          if (!p) return;
-
-          // Intuitive click routing:
-          // - Your side (near baseline half): sets / drags server position
-          // - Opponent side (far half): sets target (only if inside service box)
-          if (p.y_m <= (COURT_L_M / 2.0)) {
-            draggingServer = true;
-            try { canvas.setPointerCapture(ev.pointerId); } catch {}
-            setServerFromPointer(ev);
-          } else {
-            setTargetFromPointer(ev);
-          }
-        }
-
-        function onPointerMove(ev) {
-          if (!draggingServer) return;
-          setServerFromPointer(ev);
-        }
-
-        function onPointerUp(ev) {
-          if (!draggingServer) return;
-          draggingServer = false;
-          try { canvas.releasePointerCapture(ev.pointerId); } catch {}
+            selectedRunIdRef.value = run.id;
+            renderSelectedMeta(run);
+            draw();
+          } catch {}
         }
 
         function init() {
           detectCourtBoundsFromWhiteLines();
           canvasResizeToImage();
+
           canvas.addEventListener('pointerdown', onPointerDown);
           canvas.addEventListener('pointermove', onPointerMove);
           canvas.addEventListener('pointerup', onPointerUp);
           canvas.addEventListener('pointercancel', onPointerUp);
           window.addEventListener('resize', canvasResizeToImage);
+
           serverXInput.addEventListener('input', draw);
           targetXInput.addEventListener('input', () => { inferPlacementFromTarget(inferSideFromServerX()); draw(); });
           targetYInput.addEventListener('input', draw);
 
-          migrateOldLandingHistory();
           migrateRunHistorySchema();
-          appendLatestRun();
 
-          if (openHistoryBtn) {
-            openHistoryBtn.addEventListener('click', openHistoryDialog);
-          }
-
-          if (clearHistoryBtn) {
-            clearHistoryBtn.addEventListener('click', clearAllRuns);
-          }
+          if (openHistoryBtn) openHistoryBtn.addEventListener('click', openHistoryDialog);
+          if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', clearAllRuns);
 
           draw();
         }
 
+        // ---------------------------
+        // API call: run optimization
+        // ---------------------------
+        function collectInputs() {
+          const spin_type = spinTypeInput.value;
+
+          const server_start_x_m = parseFloat(serverXInput.value);
+          const target_x_m = targetXInput.value === "" ? null : parseFloat(targetXInput.value);
+          const target_y_m = targetYInput.value === "" ? null : parseFloat(targetYInput.value);
+
+          const side = inferSideFromServerX();
+          const placement = inferPlacementFromTarget(side);
+
+          // Keep hidden inputs in sync (for debugging / if you ever use server render)
+          sideInput.value = side;
+          placementInput.value = placement;
+
+          const toNumOrNull = (id) => {
+            const el = document.getElementById(id);
+            if (!el) return null;
+            const v = String(el.value || "").trim();
+            if (v === "") return null;
+            const n = parseFloat(v);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          return {
+            spin_type,
+            side,
+            placement,
+            server_start_x_m: Number.isFinite(server_start_x_m) ? server_start_x_m : 0.2,
+            target_x_m,
+            target_y_m,
+            height_m: toNumOrNull("height_m"),
+            arm_span_m: toNumOrNull("arm_span_m"),
+            body_mass_kg: toNumOrNull("body_mass_kg"),
+            jump_height_m: toNumOrNull("jump_height_m"),
+            swing_speed_mps: toNumOrNull("swing_speed_mps"),
+            racket_length_in: toNumOrNull("racket_length_in"),
+            string_pattern: String(document.getElementById("string_pattern").value || ""),
+            strung_weight_g: toNumOrNull("strung_weight_g"),
+            head_light_balance_pts: toNumOrNull("head_light_balance_pts"),
+            swing_weight_kgcm2: toNumOrNull("swing_weight_kgcm2"),
+          };
+        }
+
+        function renderResult(result, inputs) {
+          const resultHint = document.getElementById("resultHint");
+          const resultBox = document.getElementById("resultBox");
+          const bestKvs = document.getElementById("bestKvs");
+          const simKvs = document.getElementById("simKvs");
+          const targetSection = document.getElementById("targetSection");
+          const targetKvs = document.getElementById("targetKvs");
+
+          if (resultHint) resultHint.style.display = "none";
+          if (resultBox) resultBox.style.display = "block";
+
+          bestKvs.innerHTML = "";
+          simKvs.innerHTML = "";
+          if (targetKvs) targetKvs.innerHTML = "";
+          if (targetSection) targetSection.style.display = "none";
+
+          const best = result && result.best ? result.best : null;
+          const sim = result && result.sim ? result.sim : null;
+
+          if (best) {
+            const v_ms = best.launch_speed_mps;
+            const v_kmh = (typeof v_ms === "number") ? v_ms * 3.6 : null;
+            const v_mph = (typeof v_ms === "number") ? v_ms * 2.2369362920544 : null;
+
+            bestKvs.appendChild(kvRow("Launch speed", (v_kmh === null) ? "-" : `${v_kmh.toFixed(0)} km/h (${v_mph.toFixed(0)} mph)`));
+            bestKvs.appendChild(kvRow("Aim angles", `az ${fmtNum(best.launch_azimuth_deg, 1)}°, elev ${fmtNum(best.launch_elevation_deg, 1)}°`));
+            if (Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
+              const to = best.toss_offset_m;
+              const dist = Math.sqrt((to[0]*to[0]) + (to[1]*to[1]) + (to[2]*to[2]));
+              bestKvs.appendChild(kvRow("Toss offset", `lat ${fmtNum(to[0], 2)} m, fwd ${fmtNum(to[1], 2)} m, up ${fmtNum(to[2], 2)} m (dist ${fmtNum(dist, 2)} m)`));
+            }
+            bestKvs.appendChild(kvRow("Net clearance", `${fmtNum(best.net_clearance_m, 3)} m`));
+            bestKvs.appendChild(kvRow("Margin to lines", `${fmtNum(best.margin_m, 3)} m`));
+            if (Array.isArray(best.predicted_landing_m) && best.predicted_landing_m.length >= 2) {
+              bestKvs.appendChild(kvRow("Predicted landing", `x ${fmtNum(best.predicted_landing_m[0], 2)} m, y ${fmtNum(best.predicted_landing_m[1], 2)} m`));
+            }
+          }
+
+          if (sim) {
+            const f_ms = sim.final_speed;
+            const f_kmh = (typeof f_ms === "number") ? f_ms * 3.6 : null;
+            const f_mph = (typeof f_ms === "number") ? f_ms * 2.2369362920544 : null;
+
+            simKvs.appendChild(kvRow("Lands in", `${fmtNum(sim.t_land, 3)} s`));
+            simKvs.appendChild(kvRow("Final speed", (f_kmh === null) ? "-" : `${f_kmh.toFixed(0)} km/h (${f_mph.toFixed(0)} mph)`));
+            simKvs.appendChild(kvRow("Net crossed", fmtBool(sim.net_crossed)));
+            if (Array.isArray(sim.landing) && sim.landing.length >= 2) {
+              simKvs.appendChild(kvRow("Landing (sim)", `x ${fmtNum(sim.landing[0], 2)} m, y ${fmtNum(sim.landing[1], 2)} m`));
+            }
+          }
+
+          // Target section
+          const tx = inputs.target_x_m;
+          const ty = inputs.target_y_m;
+          if (typeof tx === "number" && typeof ty === "number") {
+            const landing = (best && Array.isArray(best.predicted_landing_m)) ? best.predicted_landing_m
+                           : (sim && Array.isArray(sim.landing)) ? sim.landing
+                           : null;
+            if (landing && landing.length >= 2) {
+              const lx = landing[0];
+              const ly = landing[1];
+              const dx = lx - tx;
+              const dy = ly - ty;
+              const miss = Math.sqrt(dx*dx + dy*dy);
+
+              if (targetSection) targetSection.style.display = "block";
+              targetKvs.appendChild(kvRow("Clicked target", `x ${fmtNum(tx, 2)} m, y ${fmtNum(ty, 2)} m`));
+              targetKvs.appendChild(kvRow("Miss distance", `${fmtNum(miss, 2)} m`));
+            }
+          }
+        }
+
+        async function runOptimize() {
+          showError("");
+          setStatus("Running…");
+
+          const inputs = collectInputs();
+
+          const url = API_BASE + OPTIMIZE_PATH;
+          const res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(inputs),
+          });
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+          }
+
+          const result = await res.json();
+
+          // Persist a history entry (so dots show up)
+          const entry = {
+            id: String(Date.now()),
+            t: Date.now(),
+            spin_type: inputs.spin_type,
+            side: inputs.side,
+            placement: inputs.placement,
+            server_start_x_m: inputs.server_start_x_m,
+            target_x_m: inputs.target_x_m,
+            target_y_m: inputs.target_y_m,
+            outputs: result,
+          };
+          if (result && result.sim && Array.isArray(result.sim.landing)) {
+            entry.x_m = Number(result.sim.landing[0]);
+            entry.y_m = Number(result.sim.landing[1]);
+          } else if (result && result.best && Array.isArray(result.best.predicted_landing_m)) {
+            entry.x_m = Number(result.best.predicted_landing_m[0]);
+            entry.y_m = Number(result.best.predicted_landing_m[1]);
+          }
+
+          appendRun(entry);
+          renderResult(result, inputs);
+
+          setStatus("Done.");
+        }
+
+        if (formEl) {
+          formEl.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            try {
+              await runOptimize();
+            } catch (e) {
+              console.error(e);
+              showError(e && e.message ? e.message : String(e));
+              setStatus("");
+            }
+          });
+        }
+
+        // Init court once image is ready
         if (img.complete) {
           init();
         } else {
           img.addEventListener('load', init);
+          img.addEventListener('error', () => {
+            showError("Court image failed to load. Check that ./imgs/court.jpg exists in your GitHub Pages /tennisim/ folder.");
+          });
         }
       })();
     </script>
