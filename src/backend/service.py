@@ -71,11 +71,41 @@ class Service:
     AIR_DENSITY = 1.225
     DRAG_COEFF = 0.55
 
+    # Spin tuning
+    # - Real kick/topspin serves can be substantially higher RPM than slice.
+    # - We allow higher topspin RPM than slice so the optimizer can find
+    #   noticeably “dipping” trajectories.
+    MAX_SPIN_RPM = 12000.0
+    # Add a small sidespin component to topspin to create a kick-like sideways jump.
+    # Kept constant across sides to match the existing on-screen convention.
+    TOPSPIN_KICK_SIDESPIN_Z = 0.40
+
     # Bounce (court contact) coefficients.
     # These are tuned for visually plausible tennis bounces rather than surface-specific calibration.
     BOUNCE_RESTITUTION_Z = 0.65
     BOUNCE_FRICTION_COEFF = 0.55
     BOUNCE_SPIN_DAMP = 0.85
+
+    # Bounce “kick” tuning: slightly higher effective friction and restitution
+    # for strong topspin (x-axis spin) to mimic a more pronounced kick.
+    BOUNCE_TOPSPIN_E_BOOST = 0.10
+    BOUNCE_GRIP_MU_BOOST = 0.30
+    BOUNCE_E_MAX = 0.82
+    BOUNCE_MU_MAX = 0.95
+
+    def _spin_axis_unit_for(self, spin_type: str) -> np.ndarray:
+        """Return a unit spin axis used by the optimizer for a given spin type."""
+        if spin_type == "slice":
+            axis = np.array([0.0, 0.0, 1.0], dtype=float)
+        elif spin_type == "topspin":
+            axis = np.array([-1.0, 0.0, float(self.TOPSPIN_KICK_SIDESPIN_Z)], dtype=float)
+        else:  # flat
+            axis = np.array([-1.0, 0.0, 0.0], dtype=float)
+
+        n = float(np.linalg.norm(axis))
+        if n < 1e-12:
+            return np.array([0.0, 0.0, 0.0], dtype=float)
+        return axis / n
 
     def __init__(self, player: Player | None = None, court: Court | None = None):
         self.player = player
@@ -351,11 +381,12 @@ class Service:
         if spin_type == "flat":
             spin_mul *= 0.6
         elif spin_type == "slice":
+            # Slice generally produces less total RPM than a kick/topspin serve.
             spin_mul *= 0.95
         else:  # topspin
             spin_mul *= 1.05
 
-        spin_mul = float(np.clip(spin_mul, 0.70, 1.35))
+        spin_mul = float(np.clip(spin_mul, 0.70, 1.45))
         return speed_mul, spin_mul
 
     def _simulate(
@@ -470,6 +501,25 @@ class Service:
                     mu = float(self.BOUNCE_FRICTION_COEFF)
                     spin_damp = float(self.BOUNCE_SPIN_DAMP)
 
+                    # Spin-aware “grip” model:
+                    # - Higher spin increases effective friction slightly.
+                    # - Strong topspin (about x) also nudges restitution upward,
+                    #   producing a more kick-like bounce.
+                    omega_mag = math.sqrt((wx * wx) + (wy * wy) + (wz * wz))
+                    vtan_mag = math.hypot(vx_imp, vy_imp)
+                    # Dimensionless spin ratio ~ (omega*R)/v.
+                    spin_ratio = (omega_mag * R) / max(1.0, float(vtan_mag))
+                    grip = max(0.0, min(1.0, float(spin_ratio / 0.55)))
+                    mu = float(min(float(self.BOUNCE_MU_MAX), mu * (1.0 + float(self.BOUNCE_GRIP_MU_BOOST) * grip)))
+
+                    topspin_frac = 0.0 if omega_mag < 1e-9 else abs(float(wx)) / float(omega_mag)
+                    e = float(
+                        min(
+                            float(self.BOUNCE_E_MAX),
+                            e + float(self.BOUNCE_TOPSPIN_E_BOOST) * grip * float(topspin_frac),
+                        )
+                    )
+
                     # Normal impulse (z): reflect with restitution.
                     vz_in = float(vz_imp)
                     if vz_in > 0.0:
@@ -513,6 +563,10 @@ class Service:
                     wx_out = float((wx + (R * Jty) / I) * spin_damp)
                     wy_out = float((wy + (-R * Jtx) / I) * spin_damp)
                     wz_out = float(wz * spin_damp)
+
+                    out["bounce_e"] = float(e)
+                    out["bounce_mu"] = float(mu)
+                    out["bounce_vz_out"] = float(vz_out)
 
                     x2 = float(x_land)
                     y2 = float(y_land)
@@ -723,24 +777,32 @@ class Service:
 
         aggressive_grid = placement in {"wide", "T"}
 
-        # Spin ranges (scaled by racket pattern/balance/swingweight heuristic)
+        # Spin search grid (RPM)
+        # We center the grid around a *typical* RPM based on swing speed and spin type,
+        # while still allowing variation (more for aggressive placements).
+        # Key constraint we want: topspin serves tend to produce ~2× the RPM of slice.
+        swing = float(swing_speed_mps)
         if spin_type == "flat":
-            base = np.array([0.0, 400.0, 900.0])
+            spin_rpm_typ = 20.0 * swing
+            facs = np.array([0.0, 0.7, 1.0, 1.25], dtype=float)
         elif spin_type == "slice":
-            # Include higher sidespin options so the model can produce genuinely wide serves.
-            base = (
-                np.array([1800.0, 3600.0, 5200.0, 6800.0, 8200.0])
+            # Typical slice RPM scale.
+            spin_rpm_typ = 110.0 * swing
+            facs = (
+                np.array([0.85, 1.00, 1.15], dtype=float)
                 if aggressive_grid
-                else np.array([1800.0, 3600.0, 5400.0, 7200.0])
+                else np.array([0.90, 1.00, 1.10], dtype=float)
             )
-        else:
-            # Kick/topspin often runs higher RPM in real serves.
-            base = (
-                np.array([2800.0, 4800.0, 6600.0, 8200.0, 9000.0])
+        else:  # topspin/kick
+            # Typical topspin/kick RPM scale (~2× slice by construction).
+            spin_rpm_typ = 220.0 * swing
+            facs = (
+                np.array([0.80, 0.95, 1.10], dtype=float)
                 if aggressive_grid
-                else np.array([2800.0, 4800.0, 6800.0, 8800.0])
+                else np.array([0.85, 1.00, 1.10], dtype=float)
             )
-        spin_rpm_grid = np.clip(base * spin_mul, 0.0, 9000.0)
+
+        spin_rpm_grid = np.clip((spin_rpm_typ * spin_mul) * facs, 0.0, float(self.MAX_SPIN_RPM))
 
         # Placement-specific aggressiveness: for wide/T (and explicit click targets),
         # prioritize the chosen spot over conservative "stay centered" margins.
@@ -807,18 +869,9 @@ class Service:
                         else:
                             # Spin axis selection (heuristic):
                             # - Slice: omega ~ +z (lateral Magnus; keep same on-screen direction across sides).
-                            # - Topspin: omega ~ -x (downward Magnus).
+                            # - Topspin: mostly -x (downward Magnus) plus some +z for a kick-like jump.
                             # - Flat: small topspin by default (also -x) so nonzero RPM actually has an effect.
-                            if spin_type == "slice":
-                                # With +y into the court and +x to server's right:
-                                # omega(+z) x v(+y) -> -x (curves left on the diagram).
-                                # Per UI preference: keep slice curvature direction the same on-screen
-                                # regardless of side.
-                                spin_axis = np.array([0.0, 0.0, 1.0], dtype=float)
-                            elif spin_type == "topspin":
-                                spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
-                            else:
-                                spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
+                            spin_axis = self._spin_axis_unit_for(spin_type)
                             omega = omega_mag * spin_axis
 
                         sim = self._simulate(contact, vel0, omega)
@@ -913,12 +966,7 @@ class Service:
                                 omega = np.zeros(3, dtype=float)
                                 spin_axis = np.array([0.0, 0.0, 0.0], dtype=float)
                             else:
-                                if spin_type == "slice":
-                                    spin_axis = np.array([0.0, 0.0, 1.0], dtype=float)
-                                elif spin_type == "topspin":
-                                    spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
-                                else:
-                                    spin_axis = np.array([-1.0, 0.0, 0.0], dtype=float)
+                                spin_axis = self._spin_axis_unit_for(spin_type)
                                 omega = omega_mag * spin_axis
 
                             sim = self._simulate(contact, vel0, omega)
