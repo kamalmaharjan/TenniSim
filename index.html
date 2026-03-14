@@ -16,7 +16,7 @@
       .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
       .court-wrap { position: relative; width: 100%; max-width: 520px; }
       .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
-      .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+      .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; touch-action: none; }
       .modebar { display: flex; gap: 8px; margin: 10px 0 8px; }
       .modebar .subbtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
       button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #222; color: white; cursor: pointer; }
@@ -1037,8 +1037,27 @@
           if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', clearAllRuns);
 
           draw();
-       
-        }})();
+
+          if (form) {
+            form.addEventListener('submit', (ev) => {
+              ev.preventDefault();
+              void doOptimize();
+            });
+          }
+        }
+
+        // Init court once image is ready
+        if (img && img.complete && img.naturalWidth > 0) {
+          init();
+        } else if (img) {
+          img.addEventListener('load', init, { once: true });
+          img.addEventListener('error', () => {
+            showError('Court image failed to load. Check that imgs/court.jpg exists and that GitHub Pages is serving it.');
+          }, { once: true });
+        } else {
+          showError('Court image element not found (courtImg).');
+        }
+      })();
     </script>
   </body>
 </html>

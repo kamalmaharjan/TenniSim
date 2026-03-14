@@ -6,7 +6,11 @@ import random
 from typing import Any, TypedDict
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
-from flask_cors import CORS
+
+try:
+	from flask_cors import CORS  # type: ignore
+except Exception:  # noqa: BLE001
+	CORS = None  # type: ignore[assignment]
 
 from src.backend.court import Court
 from src.backend.player import Player
@@ -169,8 +173,14 @@ def create_app() -> Flask:
 		if request.method == "OPTIONS":
 			# Preflight request for CORS
 			return ("", 204)
-		payload = request.get_json(force=True, silent=False) or {}
-		result = _run_optimizer(payload)
+		try:
+			payload = request.get_json(force=True, silent=False) or {}
+		except Exception as e:  # noqa: BLE001
+			return jsonify({"error": f"Invalid JSON: {e}"}), 400
+		try:
+			result = _run_optimizer(payload)
+		except Exception as e:  # noqa: BLE001
+			return jsonify({"error": str(e)}), 500
 		return jsonify(result)
 
 	return app
@@ -369,9 +379,10 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 
 app = create_app()
 
-CORS(
-    app,
-    resources={r"/api/*": {"origins": ["https://kamalmaharjan.github.io"]}},
-    methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
-)
+if CORS is not None:
+	CORS(
+		app,
+		resources={r"/api/*": {"origins": ["https://kamalmaharjan.github.io"]}},
+		methods=["GET", "POST", "OPTIONS"],
+		allow_headers=["Content-Type"],
+	)
