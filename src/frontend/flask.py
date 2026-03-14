@@ -6,6 +6,7 @@ import random
 from typing import Any, TypedDict
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask_cors import CORS
 
 from src.backend.court import Court
 from src.backend.player import Player
@@ -49,7 +50,7 @@ def create_app() -> Flask:
 		__name__,
 		template_folder=str(ROOT_DIR / "templates"),
 	)
-
+	
 	@app.after_request
 	def add_cors_headers(resp):
 		# Allow a static frontend (e.g., GitHub Pages) to call the JSON API.
@@ -73,10 +74,10 @@ def create_app() -> Flask:
 			"arm_span_m": 1.88,
 			"body_mass_kg": 78.0,
 			"racket_length_in": 27.0,
-			"string_pattern": "16x19",
-			"strung_weight_g": 315.0,
-			"head_light_balance_pts": 4.0,
-			"swing_weight_kgcm2": 320.0,
+			"string_pattern": "18x20",
+			"strung_weight_g": 345.0,
+			"head_light_balance_pts": 7.0,
+			"swing_weight_kgcm2": 330.0,
 
 			# Optional: click-to-set target
 			"target_x_m": "",
@@ -110,10 +111,10 @@ def create_app() -> Flask:
 			"arm_span_m": f("arm_span_m", 1.88),
 			"body_mass_kg": f("body_mass_kg", 78.0),
 			"racket_length_in": f("racket_length_in", 27.0),
-			"string_pattern": request.form.get("string_pattern", "16x19"),
-			"strung_weight_g": f("strung_weight_g", 315.0),
-			"head_light_balance_pts": f("head_light_balance_pts", 4.0),
-			"swing_weight_kgcm2": f("swing_weight_kgcm2", 320.0),
+			"string_pattern": request.form.get("string_pattern", "18x20"),
+			"strung_weight_g": f("strung_weight_g", 345.0),
+			"head_light_balance_pts": f("head_light_balance_pts", 7.0),
+			"swing_weight_kgcm2": f("swing_weight_kgcm2", 330.0),
 
 			"target_x_m": request.form.get("target_x_m", ""),
 			"target_y_m": request.form.get("target_y_m", ""),
@@ -367,3 +368,10 @@ def _run_optimizer(payload: OptimizeRequest) -> dict[str, Any]:
 
 
 app = create_app()
+
+CORS(
+    app,
+    resources={r"/api/*": {"origins": ["https://kamalmaharjan.github.io"]}},
+    methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
