@@ -52,7 +52,7 @@
   <body>
     <header>
       <h1>TenniSim</h1>
-      <p class="muted">GitHub Pages UI calling PythonAnywhere API.</p>
+      <p class="muted">Minimal UI to run the serve optimizer and forward simulation. Using PythonAnywhere API.</p>
     </header>
 
     <main>
@@ -216,8 +216,22 @@
     </dialog>
 
     <script>
-      // PythonAnywhere JSON API base
-      const API_BASE = 'https://kamalmaharjan.pythonanywhere.com';
+      // API base selection:
+      // - When running locally (Flask on localhost/127.0.0.1), call same-origin so we hit the local backend.
+      // - When running from a static file or GitHub Pages, fall back to PythonAnywhere.
+      const PYTHONANYWHERE_BASE = 'https://kamalmaharjan.pythonanywhere.com';
+      const API_BASE = (() => {
+        try {
+          const host = (window.location && window.location.hostname) ? String(window.location.hostname) : '';
+          const proto = (window.location && window.location.protocol) ? String(window.location.protocol) : '';
+          if (host === 'localhost' || host === '127.0.0.1') return '';
+          if (host.endsWith('.pythonanywhere.com')) return '';
+          if (proto === 'file:') return PYTHONANYWHERE_BASE;
+          return PYTHONANYWHERE_BASE;
+        } catch {
+          return PYTHONANYWHERE_BASE;
+        }
+      })();
 
       (function () {
         // ---------- DOM ----------
@@ -531,6 +545,71 @@
           ctx.stroke();
         }
 
+        function drawVarianceScatterForRun(run) {
+          if (!run) return;
+          const r = normalizeRunSchema(run) || run;
+          const out = (r && r.outputs && typeof r.outputs === 'object') ? r.outputs : null;
+          const samples = (
+            out && Array.isArray(out.sim_samples) ? out.sim_samples :
+            Array.isArray(r.sim_samples) ? r.sim_samples :
+            null
+          );
+          if (!samples || samples.length === 0) return;
+
+          ctx.save();
+          ctx.fillStyle = 'rgba(160, 0, 255, 0.25)';
+          for (const s of samples) {
+            const landing = s && s.landing;
+            if (!Array.isArray(landing) || landing.length < 2) continue;
+            const x_m = Number(landing[0]);
+            const y_m = Number(landing[1]);
+            if (!Number.isFinite(x_m) || !Number.isFinite(y_m)) continue;
+            const p = courtMetersToImg(x_m, y_m);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        function drawTrajectoryPathXY(pathXY, strokeStyle, lineWidth, dash) {
+          if (!Array.isArray(pathXY) || pathXY.length < 2) return;
+
+          ctx.save();
+          ctx.strokeStyle = strokeStyle;
+          ctx.lineWidth = lineWidth;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          try { ctx.setLineDash(Array.isArray(dash) ? dash : []); } catch {}
+
+          let started = false;
+          ctx.beginPath();
+          for (const pt of pathXY) {
+            if (!Array.isArray(pt) || pt.length < 2) continue;
+            const x_m = Number(pt[0]);
+            const y_m = Number(pt[1]);
+            if (!Number.isFinite(x_m) || !Number.isFinite(y_m)) continue;
+            // Map without clamping so off-court points don't collapse to the edge.
+            const rect = img.getBoundingClientRect();
+            const b = getBounds();
+            const insetW = (1 - b.left - b.right);
+            const uCenter = clamp((courtCenterXFrac - b.left) / insetW, 0.0, 1.0);
+            const u = (x_m / COURT_W_M) + uCenter;
+            const v = 1 - (y_m / COURT_L_M);
+            const uInset = b.left + u * (1 - b.left - b.right);
+            const vInset = b.top + v * (1 - b.top - b.bottom);
+            const p = { x: uInset * rect.width, y: vInset * rect.height };
+            if (!started) {
+              ctx.moveTo(p.x, p.y);
+              started = true;
+            } else {
+              ctx.lineTo(p.x, p.y);
+            }
+          }
+          if (started) ctx.stroke();
+          ctx.restore();
+        }
+
         function dist2(ax, ay, bx, by) {
           const dx = ax - bx;
           const dy = ay - by;
@@ -729,6 +808,63 @@
             drawMarker(tp.x, tp.y, 'rgba(0, 170, 60, 0.9)');
           }
 
+          // Trajectories: draw for the currently selected run (if available)
+          try {
+            if (selectedRunId !== null) {
+              const pts = getRunHistory();
+              const run = pts.find(p => p && String(p.id) === String(selectedRunId));
+              const r = normalizeRunSchema(run) || run;
+              const out = (r && r.outputs && typeof r.outputs === 'object') ? r.outputs : null;
+
+              const samples = (
+                out && Array.isArray(out.sim_samples) ? out.sim_samples :
+                Array.isArray(r && r.sim_samples) ? r.sim_samples :
+                null
+              );
+              if (samples && samples.length) {
+                for (const s of samples) {
+                  const pathXY = s && s.path_xy;
+                  drawTrajectoryPathXY(pathXY, 'rgba(160, 0, 255, 0.10)', 1.25, []);
+
+                  const pathPost = s && s.path_xy_post;
+                  drawTrajectoryPathXY(pathPost, 'rgba(160, 0, 255, 0.07)', 1.0, []);
+                }
+              }
+
+              const sim = out && out.sim ? out.sim : (r && r.sim ? r.sim : null);
+              const hasLanding = (r && typeof r.x_m === 'number' && Number.isFinite(r.x_m) && typeof r.y_m === 'number' && Number.isFinite(r.y_m));
+
+              // Main (pre-bounce) trajectory. Prefer simulated path; otherwise fall back
+              // to a simple straight line from server -> recorded landing.
+              if (sim && Array.isArray(sim.path_xy) && sim.path_xy.length >= 2) {
+                drawTrajectoryPathXY(sim.path_xy, 'rgba(0, 0, 0, 0.45)', 3.0, [10, 7]);
+              } else if (Number.isFinite(serverX) && hasLanding) {
+                drawTrajectoryPathXY([[serverX, 0.0], [r.x_m, r.y_m]], 'rgba(0, 0, 0, 0.35)', 3.0, [10, 7]);
+              }
+
+              // Post-bounce segment. Prefer simulated post-bounce path; otherwise, if
+              // landing2 is present, draw a straight segment landing -> landing2.
+              if (sim && Array.isArray(sim.path_xy_post) && sim.path_xy_post.length >= 2) {
+                drawTrajectoryPathXY(sim.path_xy_post, 'rgba(0, 0, 0, 0.28)', 2.0, []);
+              } else if (hasLanding && sim && Array.isArray(sim.landing2) && sim.landing2.length >= 2) {
+                const x2 = Number(sim.landing2[0]);
+                const y2 = Number(sim.landing2[1]);
+                if (Number.isFinite(x2) && Number.isFinite(y2)) {
+                  drawTrajectoryPathXY([[r.x_m, r.y_m], [x2, y2]], 'rgba(0, 0, 0, 0.22)', 2.0, []);
+                }
+              }
+            }
+          } catch {}
+
+          // Variance scatter: draw MC landing samples for the currently selected run.
+          try {
+            if (selectedRunId !== null) {
+              const pts = getRunHistory();
+              const run = pts.find(p => p && String(p.id) === String(selectedRunId));
+              if (run) drawVarianceScatterForRun(run);
+            }
+          } catch {}
+
           try {
             const pts = getRunHistory();
             for (const p of pts) {
@@ -738,6 +874,16 @@
               drawMarker(lp.x, lp.y, isSel ? 'rgba(210, 0, 0, 0.92)' : 'rgba(255, 140, 0, 0.92)');
             }
           } catch {}
+
+          // Re-draw server + target markers on top.
+          if (Number.isFinite(serverX)) {
+            const sp = courtMetersToImg(serverX, 0.0);
+            drawMarker(sp.x, sp.y, 'rgba(0, 120, 255, 0.9)');
+          }
+          if (Number.isFinite(tx) && Number.isFinite(ty)) {
+            const tp = courtMetersToImg(tx, ty);
+            drawMarker(tp.x, tp.y, 'rgba(0, 170, 60, 0.9)');
+          }
         }
 
         function pickRunAtPointer(ev) {
