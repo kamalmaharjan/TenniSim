@@ -25,7 +25,7 @@
       .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
       .court-wrap { position: relative; width: 100%; max-width: 520px; }
       .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
-      .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+      .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; touch-action: none; }
       .side-wrap { width: 100%; max-width: 520px; margin-top: 10px; }
       .side-canvas { width: 100%; height: 220px; display: block; border-radius: 10px; border: 1px solid #ddd; background: #222; }
       .side-info { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
@@ -67,6 +67,22 @@
         input, select { max-width: none; }
         .grid > div { max-width: none; }
         .side-info { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 520px) {
+        body { margin: 12px; max-width: none; }
+        .card { padding: 12px; }
+        .grid { grid-template-columns: 1fr; }
+        .modebar { flex-wrap: wrap; }
+        .modebar .spacer { display: none; }
+        input, select, button { font-size: 16px; }
+        input, select { min-height: 44px; }
+        button, .modebar .subbtn { min-height: 44px; }
+        button, .modebar .subbtn { touch-action: manipulation; }
+        .modebar .subbtn { flex: 1 1 calc(50% - 6px); }
+        #optimizeBtn { flex: 1 1 100%; }
+        .side-canvas { height: 240px; }
+        .dlg-body { overflow-x: auto; }
       }
     </style>
   </head>
@@ -753,11 +769,14 @@
             else sideMetricsEl.textContent = String(lines);
           }
 
-          // Padding also acts as reserved label space; keep it large enough
-          // so bottom axis labels can render *under* the axis without clipping.
-          const pad = 40;
           const w = rect.width;
           const h = rect.height;
+          const isNarrow = w < 420;
+          const fontPx = isNarrow ? 9 : 10;
+          const baseFont = `${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+          // Padding also acts as reserved label space; keep it large enough
+          // so bottom axis labels can render *under* the axis without clipping.
+          const pad = (w < 360 ? 36 : 40);
 
           // Ground line
           sideCtx.save();
@@ -831,7 +850,7 @@
             sideCtx.save();
             sideCtx.textAlign = align;
             sideCtx.textBaseline = baseline;
-            sideCtx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            sideCtx.font = baseFont;
             sideCtx.lineWidth = 3;
             sideCtx.strokeStyle = labelStroke;
             sideCtx.strokeText(text, x, y);
@@ -868,8 +887,14 @@
           // Legend (top-right)
           {
             const x = w - pad - 2;
-            const y = pad + 2;
-            drawText('PBL = Player baseline   N = net   S = Service box   RBL = Rec. Baseline', x, y, 'right', 'top');
+            let y = pad + 2;
+            if (isNarrow) {
+              drawText('PBL = Player baseline   N = net', x, y, 'right', 'top');
+              y += fontPx + 3;
+              drawText('S = Service box   RBL = Rec. Baseline', x, y, 'right', 'top');
+            } else {
+              drawText('PBL = Player baseline   N = net   S = Service box   RBL = Rec. Baseline', x, y, 'right', 'top');
+            }
           }
 
           // Reference verticals
@@ -885,7 +910,7 @@
             if (label) {
               const x = Math.min(p.x + 4, w - pad - 80);
               const y = (typeof labelY === 'number' ? labelY : (h - 6));
-              sideCtx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+              sideCtx.font = baseFont;
               sideCtx.lineWidth = 3;
               sideCtx.strokeStyle = labelStroke;
               sideCtx.strokeText(label, x, y);
@@ -1400,6 +1425,7 @@
           const ok = window.confirm('Clear all saved runs? This cannot be undone.');
           if (!ok) return;
           try { localStorage.removeItem('runHistory'); } catch {}
+          try { setRunHistory([]); } catch {}
           selectedRunIdRef.value = null;
           renderSelectedMeta(null);
           draw();
@@ -1416,6 +1442,25 @@
             renderSelectedMeta(run);
             draw();
           } catch {}
+        }
+
+        function bindTap(el, handler) {
+          if (!el || typeof handler !== 'function') return;
+          let lastFire = 0;
+          const fire = (ev) => {
+            const now = Date.now();
+            if (now - lastFire < 400) return;
+            lastFire = now;
+            try { if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation(); } catch {}
+            handler(ev);
+          };
+          if (typeof window !== 'undefined' && 'PointerEvent' in window) {
+            el.addEventListener('pointerdown', (ev) => {
+              if (!ev || (ev.isPrimary === false)) return;
+              if (ev.pointerType === 'touch' || ev.pointerType === 'pen') fire(ev);
+            });
+          }
+          el.addEventListener('click', fire);
         }
 
         function init() {
@@ -1435,8 +1480,8 @@
 
           migrateRunHistorySchema();
 
-          if (openHistoryBtn) openHistoryBtn.addEventListener('click', openHistoryDialog);
-          if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', clearAllRuns);
+          bindTap(openHistoryBtn, openHistoryDialog);
+          bindTap(clearHistoryBtn, clearAllRuns);
 
           draw();
         }
