@@ -999,7 +999,9 @@
             else sideMetricsEl.textContent = String(lines);
           }
 
-          const pad = 24;
+          // Padding also acts as reserved label space; keep it large enough
+          // so bottom axis labels can render *under* the axis without clipping.
+          const pad = 40;
           const w = rect.width;
           const h = rect.height;
 
@@ -1098,18 +1100,25 @@
             sideCtx.moveTo(pad, p.y);
             sideCtx.lineTo(w - pad, p.y);
             sideCtx.stroke();
-            drawText(`${z.toFixed(0)} m`, pad + 16, p.y - 2, 'left', 'bottom');
+            drawText(`${z.toFixed(0)}`, pad + 16, p.y - 2, 'left', 'bottom');
           }
           sideCtx.restore();
 
           // Axis unit labels
-          // y-axis label along the bottom axis line; z-axis label vertical.
-          drawText('y (m)', w - pad - 2, h - pad - 8, 'right', 'bottom');
+          const axisY = h - pad;
+          drawText('y (m)', w - pad - 2, axisY + 2, 'right', 'top');
           sideCtx.save();
-          sideCtx.translate(12, pad + plotH / 2);
+          sideCtx.translate(pad - 14, pad + plotH / 2);
           sideCtx.rotate(-Math.PI / 2);
           drawText('z (m)', 0, 0, 'center', 'middle');
           sideCtx.restore();
+
+          // Legend (top-right)
+          {
+            const x = w - pad - 2;
+            const y = pad + 2;
+            drawText('PBL = Player baseline   N = net   S = Service box   RBL = Rec. Baseline', x, y, 'right', 'top');
+          }
 
           // Reference verticals
           const drawVLine = (y_m, stroke, label, labelY) => {
@@ -1136,10 +1145,10 @@
 
           // Place labels directly under their marks, with a glowing dot.
           const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-          const axisY = h - pad;
           const dotFill = labelFill;
           const dotGlow = 'rgba(204, 255, 0, 0.75)';
-          const drawAxisMarker = (y_m, label) => {
+          const fmtY = (v) => (Math.abs(v) < 1e-6 ? '0' : `${v.toFixed(1)}`);
+          const drawAxisMarker = (y_m, abbr) => {
             const p = toPx(y_m, 0.0);
             const x = clamp(p.x, pad + 12, w - pad - 12);
 
@@ -1153,19 +1162,19 @@
             sideCtx.fill();
             sideCtx.restore();
 
-            // Label centered under mark
-            drawText(label, x, axisY + 10, 'center', 'top');
+            // Labels centered under mark (two lines)
+            drawText(abbr, x, axisY + 10, 'center', 'top');
+            drawText(fmtY(y_m), x, axisY + 22, 'center', 'top');
           };
 
           drawVLine(0.0, gridStroke, null);
           drawVLine(netY, gridStroke, null);
           drawVLine(serviceLineY, gridStroke, null);
           drawVLine(COURT_L_M, gridStroke, null);
-          drawAxisMarker(0.0, 'BL 0m');
-          drawAxisMarker(netY, `net ${netY.toFixed(1)}m`);
-          drawAxisMarker(serviceLineY, `service ${serviceLineY.toFixed(1)}m`);
-          drawAxisMarker(COURT_L_M, `recv BL ${COURT_L_M.toFixed(1)}m`);
-          drawVLine(COURT_L_M, gridStroke, `recv BL ${COURT_L_M.toFixed(1)}m`, h - 18);
+          drawAxisMarker(0.0, 'PBL');
+          drawAxisMarker(netY, 'N');
+          drawAxisMarker(serviceLineY, 'S');
+          drawAxisMarker(COURT_L_M, 'RBL');
 
           // Net
           sideCtx.save();
