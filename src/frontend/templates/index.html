@@ -6,11 +6,20 @@
     <title>TenniSim</title>
     <style>
       * { box-sizing: border-box; }
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px auto; max-width: 1040px; }
+      :root {
+        --tennis-ball: #CCFF00;
+        --opt-gold: #FFD700;
+        --opt-red: #7A0019;
+      }
+      html { background: #154734; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px auto; max-width: 1040px; color: var(--tennis-ball); }
+      header { text-align: center; }
+      header h1 { margin: 0 0 6px; }
+      header .muted { margin: 0 auto 12px; max-width: 760px; }
       .row { display: grid; grid-template-columns: minmax(360px, 520px) minmax(360px, 520px); gap: 18px; justify-content: center; }
       .card { border: 1px solid #e6e6e6; border-radius: 12px; padding: 16px; }
-      label { display: block; font-size: 12px; color: #444; margin-bottom: 6px; }
-      input, select { width: 100%; max-width: 220px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+      label { display: block; font-size: 12px; color: var(--tennis-ball); margin-bottom: 6px; }
+      input, select { width: 100%; max-width: 220px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; background: #222; color: var(--tennis-ball); }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       .grid > div { max-width: 220px; }
       .actions { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
@@ -18,39 +27,43 @@
       .court-img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid #ddd; }
       .court-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
       .side-wrap { width: 100%; max-width: 520px; margin-top: 10px; }
-      .side-canvas { width: 100%; height: 220px; display: block; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
+      .side-canvas { width: 100%; height: 220px; display: block; border-radius: 10px; border: 1px solid #ddd; background: #222; }
       .side-info { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
       .modebar { display: flex; gap: 8px; margin: 10px 0 8px; }
-      .modebtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
+      .modebtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #222; color: var(--tennis-ball); cursor: pointer; }
       .modebtn.active { border-color: #111; }
       .modebar .spacer { flex: 1; }
-      .modebar .subbtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
-      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #222; color: white; cursor: pointer; }
-      pre { background: #0b0b0b; color: #f3f3f3; padding: 12px; border-radius: 10px; overflow: auto; }
-      .error { color: #b00020; white-space: pre-wrap; }
-      .muted { color: #666; font-size: 12px; }
+      .modebar .subbtn { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #222; color: var(--tennis-ball); cursor: pointer; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #222; color: var(--tennis-ball); cursor: pointer; }
+      #optimizeBtn { background: var(--opt-gold); color: var(--opt-red); border-color: #fff; }
+      pre { background: #0b0b0b; color: var(--tennis-ball); padding: 12px; border-radius: 10px; overflow: auto; }
+      .error { color: var(--tennis-ball); white-space: pre-wrap; }
+      .muted { color: var(--tennis-ball); font-size: 12px; }
       .kvs { display: grid; grid-template-columns: 1fr; gap: 2px; }
-      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
+      .kv { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; }
       .kv:last-child { border-bottom: none; }
-      .kv .k { color: #555; font-size: 12px; }
+      .kv .k, .kv .v { font-size: 13px; }
+      .kv .k { color: var(--tennis-ball); font-weight: 700; }
       .kv .v { font-variant-numeric: tabular-nums; text-align: right; }
+      .kv.kv-highlight { border: 1px solid rgba(204, 255, 0, 0.75); border-radius: 10px; padding: 8px 10px; box-shadow: 0 0 12px rgba(204, 255, 0, 0.35); margin: 6px 0; border-bottom: none; }
+      .kv.kv-highlight .v { font-weight: 700; }
       .section { margin-top: 10px; }
 
-      dialog { border: 1px solid #ddd; border-radius: 12px; padding: 0; width: min(920px, calc(100vw - 32px)); }
+      dialog { border: 1px solid #ddd; border-radius: 12px; padding: 0; width: min(920px, calc(100vw - 32px)); background: #222; color: var(--tennis-ball); }
       dialog::backdrop { background: rgba(0, 0, 0, 0.30); }
       .dlg-head { padding: 14px 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
       .dlg-body { padding: 12px 16px 16px; }
-      .dlg-close { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #fff; color: #111; cursor: pointer; }
+      .dlg-close { padding: 8px 10px; border-radius: 10px; border: 1px solid #999; background: #222; color: var(--tennis-ball); cursor: pointer; }
       table { width: 100%; border-collapse: collapse; font-size: 12px; }
       th, td { padding: 8px 8px; border-bottom: 1px solid #f0f0f0; text-align: left; font-variant-numeric: tabular-nums; }
-      tr.sel { background: #fff5f5; }
-      tr:hover { background: #fafafa; cursor: pointer; }
-      .meta { margin-top: 10px; padding: 10px 12px; border: 1px solid #eee; border-radius: 12px; white-space: pre-wrap; }
+      tr.sel { background: rgba(204, 255, 0, 0.18); }
+      tr:hover { background: rgba(204, 255, 0, 0.10); cursor: pointer; }
+      .meta { margin-top: 10px; padding: 10px 12px; border: 1px solid #fff; border-radius: 12px; white-space: pre-wrap; background: #222; font-size: 13px; line-height: 1.35; }
 
       @media (max-width: 980px) {
         body { margin: 16px auto; max-width: 720px; }
         .row { grid-template-columns: 1fr; }
-        .kv { grid-template-columns: 120px 1fr; }
+        .kv { grid-template-columns: 1fr auto; }
         input, select { max-width: none; }
         .grid > div { max-width: none; }
         .side-info { grid-template-columns: 1fr; }
@@ -94,6 +107,8 @@
           <div class="modebar">
             <button type="button" class="subbtn" id="openHistory">History</button>
             <button type="button" class="subbtn" id="clearHistory">Clear runs</button>
+            <div class="spacer" aria-hidden="true"></div>
+            <button type="submit" id="optimizeBtn">Simulate</button>
           </div>
           <div class="court-wrap">
             <!-- FIX: use relative URL so it works under /tennisim/ on GitHub Pages -->
@@ -162,7 +177,6 @@
           </div>
 
           <div class="actions">
-            <button type="submit" id="optimizeBtn">Optimize</button>
             <span class="muted" id="status" role="status" aria-live="polite" aria-atomic="true"></span>
           </div>
 
@@ -262,9 +276,10 @@
           errorBox.textContent = String(msg);
         }
 
-        function kvRow(k, v) {
+        function kvRow(k, v, opts = null) {
           const div = document.createElement("div");
-          div.className = "kv";
+          const highlight = !!(opts && opts.highlight);
+          div.className = highlight ? "kv kv-highlight" : "kv";
           div.innerHTML = `<div class="k"></div><div class="v"></div>`;
           div.querySelector(".k").textContent = k;
           div.querySelector(".v").textContent = v;
@@ -724,6 +739,13 @@
           const rect = sideCanvas.getBoundingClientRect();
           sideCtx.clearRect(0, 0, rect.width, rect.height);
 
+          const tennisBall = (getComputedStyle(document.documentElement).getPropertyValue('--tennis-ball') || '').trim() || '#CCFF00';
+          const gridStroke = 'rgba(204, 255, 0, 0.18)';
+          const unitGridStroke = 'rgba(204, 255, 0, 0.08)';
+          const axisStroke = 'rgba(204, 255, 0, 0.28)';
+          const labelFill = tennisBall;
+          const labelStroke = 'rgba(0, 0, 0, 0.65)';
+
           function setMetrics(lines) {
             if (!sideMetricsEl) return;
             if (!lines) { sideMetricsEl.textContent = ''; return; }
@@ -737,7 +759,7 @@
 
           // Ground line
           sideCtx.save();
-          sideCtx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          sideCtx.strokeStyle = axisStroke;
           sideCtx.lineWidth = 1;
           sideCtx.beginPath();
           sideCtx.moveTo(pad, h - pad);
@@ -803,8 +825,46 @@
             return { x, y: yy };
           };
 
+          const drawText = (text, x, y, align = 'left', baseline = 'alphabetic') => {
+            sideCtx.save();
+            sideCtx.textAlign = align;
+            sideCtx.textBaseline = baseline;
+            sideCtx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+            sideCtx.lineWidth = 3;
+            sideCtx.strokeStyle = labelStroke;
+            sideCtx.strokeText(text, x, y);
+            sideCtx.fillStyle = labelFill;
+            sideCtx.fillText(text, x, y);
+            sideCtx.restore();
+          };
+
+          // Z-axis (height) tick lines
+          sideCtx.save();
+          sideCtx.strokeStyle = unitGridStroke;
+          sideCtx.lineWidth = 1;
+          const zTickStep = 1.0;
+          const zTickMax = Math.max(0.0, Math.floor(zMax / zTickStep) * zTickStep);
+          for (let z = zTickStep; z <= zTickMax + 1e-9; z += zTickStep) {
+            const p = toPx(0.0, z);
+            sideCtx.beginPath();
+            sideCtx.moveTo(pad, p.y);
+            sideCtx.lineTo(w - pad, p.y);
+            sideCtx.stroke();
+            drawText(`${z.toFixed(0)} m`, pad + 16, p.y - 2, 'left', 'bottom');
+          }
+          sideCtx.restore();
+
+          // Axis unit labels
+          // y-axis label along the bottom axis line; z-axis label vertical.
+          drawText('y (m)', w - pad - 2, h - pad - 8, 'right', 'bottom');
+          sideCtx.save();
+          sideCtx.translate(12, pad + plotH / 2);
+          sideCtx.rotate(-Math.PI / 2);
+          drawText('z (m)', 0, 0, 'center', 'middle');
+          sideCtx.restore();
+
           // Reference verticals
-          const drawVLine = (y_m, stroke, label) => {
+          const drawVLine = (y_m, stroke, label, labelY) => {
             const p = toPx(y_m, 0.0);
             sideCtx.save();
             sideCtx.strokeStyle = stroke;
@@ -814,22 +874,30 @@
             sideCtx.lineTo(p.x, h - pad);
             sideCtx.stroke();
             if (label) {
-              sideCtx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-              sideCtx.font = '11px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-              sideCtx.fillText(label, Math.min(p.x + 4, w - pad - 80), h - 6);
+              const x = Math.min(p.x + 4, w - pad - 80);
+              const y = (typeof labelY === 'number' ? labelY : (h - 6));
+              sideCtx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+              sideCtx.lineWidth = 3;
+              sideCtx.strokeStyle = labelStroke;
+              sideCtx.strokeText(label, x, y);
+              sideCtx.fillStyle = labelFill;
+              sideCtx.fillText(label, x, y);
             }
             sideCtx.restore();
           };
 
-          drawVLine(0.0, 'rgba(0, 0, 0, 0.22)', 'baseline');
-          drawVLine(netY, 'rgba(0, 0, 0, 0.18)', 'net');
-          drawVLine(serviceLineY, 'rgba(0, 0, 0, 0.14)', 'service');
-          drawVLine(COURT_L_M, 'rgba(0, 0, 0, 0.16)', 'recv BL');
+          // Stagger labels to avoid overlaps
+          drawVLine(0.0, gridStroke, 'baseline 0m', h - 6);
+          drawVLine(netY, gridStroke, `net ${netY.toFixed(1)}m`, h - 18);
+          drawVLine(serviceLineY, gridStroke, `service ${serviceLineY.toFixed(1)}m`, h - 6);
+          drawVLine(COURT_L_M, gridStroke, `recv BL ${COURT_L_M.toFixed(1)}m`, h - 18);
 
           // Net
           sideCtx.save();
-          sideCtx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
-          sideCtx.lineWidth = 2;
+          sideCtx.strokeStyle = labelFill;
+          sideCtx.lineWidth = 3;
+          sideCtx.shadowBlur = 10;
+          sideCtx.shadowColor = 'rgba(204, 255, 0, 0.75)';
           const n0 = toPx(netY, 0.0);
           const n1 = toPx(netY, netZ);
           sideCtx.beginPath();
@@ -903,8 +971,8 @@
             sideCtx.fill();
             sideCtx.restore();
           };
-          if (yBounce !== null) drawDot(yBounce, 0.0, 'rgba(0, 0, 0, 0.35)');
-          if (yBounce2 !== null) drawDot(yBounce2, 0.0, 'rgba(0, 0, 0, 0.22)');
+          if (yBounce !== null) drawDot(yBounce, 0.0, 'rgba(255, 255, 255, 0.65)');
+          if (yBounce2 !== null) drawDot(yBounce2, 0.0, 'rgba(255, 255, 255, 0.45)');
 
           // Samples first
           if (samples && samples.length) {
@@ -916,10 +984,10 @@
 
           // Main paths
           if (sim && Array.isArray(sim.path_yz) && sim.path_yz.length >= 2) {
-            drawTrajectoryPathYZ(sim.path_yz, 'rgba(0, 0, 0, 0.45)', 3.0, [10, 7], toPx);
+            drawTrajectoryPathYZ(sim.path_yz, 'rgba(255, 255, 255, 0.78)', 3.0, [10, 7], toPx);
           }
           if (sim && Array.isArray(sim.path_yz_post) && sim.path_yz_post.length >= 2) {
-            drawTrajectoryPathYZ(sim.path_yz_post, 'rgba(0, 0, 0, 0.28)', 2.0, [], toPx);
+            drawTrajectoryPathYZ(sim.path_yz_post, 'rgba(255, 255, 255, 0.55)', 2.0, [], toPx);
           }
         }
 
@@ -1034,7 +1102,6 @@
           }
           const r = normalizeRunSchema(run) || run;
           const lines = [];
-          lines.push(`Run: ${r.id || '-'}    Time: ${new Date(r.t || Date.now()).toLocaleString()}`);
           lines.push(`Spin: ${r.spin_type || '-'}    Side: ${r.side || '-'}    Placement: ${r.placement || '-'}`);
           lines.push(`Server start X: ${fmtNum(r.server_start_x_m, 2)} m    Target: x ${fmtNum(r.target_x_m, 2)} m, y ${fmtNum(r.target_y_m, 2)} m`);
           lines.push(`Landing: x ${fmtNum(r.x_m, 2)} m, y ${fmtNum(r.y_m, 2)} m`);
@@ -1290,7 +1357,6 @@
             });
             tbody.appendChild(tr);
           }
-
           try { dlg.showModal(); } catch {}
         }
 
@@ -1409,16 +1475,20 @@
             const v_kmh = (typeof v_ms === "number") ? v_ms * 3.6 : null;
             const v_mph = (typeof v_ms === "number") ? v_ms * 2.2369362920544 : null;
 
-            bestKvs.appendChild(kvRow("Launch speed", (v_kmh === null) ? "-" : `${v_kmh.toFixed(0)} km/h (${v_mph.toFixed(0)} mph)`));
-            bestKvs.appendChild(kvRow("Aim angles", `az ${fmtNum(best.launch_azimuth_deg, 1)}°, elev ${fmtNum(best.launch_elevation_deg, 1)}°`));
+            // Highlight row: always show toss first.
+            let tossText = "-";
             if (Array.isArray(best.toss_offset_m) && best.toss_offset_m.length === 3) {
               const to = best.toss_offset_m;
               const up = Number(to[2]);
               const fwd = Number(to[1]);
               const upTxt = `${fmtNum(Math.abs(up), 2)} m high`;
               const fwdTxt = `${fmtNum(Math.abs(fwd), 2)} m ${fwd >= 0 ? 'in front of' : 'behind'} you`;
-              bestKvs.appendChild(kvRow("Recommended toss", `Recommended toss distance: ${upTxt} and ${fwdTxt}.`));
+              tossText = `${upTxt} and ${fwdTxt}.`;
             }
+            bestKvs.appendChild(kvRow("Recommended toss", tossText, { highlight: true }));
+
+            bestKvs.appendChild(kvRow("Launch speed", (v_kmh === null) ? "-" : `${v_kmh.toFixed(0)} km/h (${v_mph.toFixed(0)} mph)`));
+            bestKvs.appendChild(kvRow("Aim angles", `az ${fmtNum(best.launch_azimuth_deg, 1)}°, elev ${fmtNum(best.launch_elevation_deg, 1)}°`));
             bestKvs.appendChild(kvRow("Net clearance", `${fmtNum(best.net_clearance_m, 3)} m`));
             bestKvs.appendChild(kvRow("Margin to lines", `${fmtNum(best.margin_m, 3)} m`));
             if (Array.isArray(best.predicted_landing_m) && best.predicted_landing_m.length >= 2) {
@@ -1462,7 +1532,7 @@
 
         async function runOptimize() {
           showError("");
-          setStatus("Running…");
+          setStatus("Simulating…");
 
           const inputs = collectInputs();
 
@@ -1504,8 +1574,7 @@
 
           appendRun(entry);
           renderResult(result, inputs);
-
-          setStatus("Done.");
+          setStatus("");
         }
 
         if (formEl) {
