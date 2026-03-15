@@ -1134,10 +1134,37 @@
             sideCtx.restore();
           };
 
-          // Stagger labels to avoid overlaps
-          drawVLine(0.0, gridStroke, 'baseline 0m', h - 6);
-          drawVLine(netY, gridStroke, `net ${netY.toFixed(1)}m`, h - 18);
-          drawVLine(serviceLineY, gridStroke, `service ${serviceLineY.toFixed(1)}m`, h - 6);
+          // Place labels directly under their marks, with a glowing dot.
+          const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+          const axisY = h - pad;
+          const dotFill = labelFill;
+          const dotGlow = 'rgba(204, 255, 0, 0.75)';
+          const drawAxisMarker = (y_m, label) => {
+            const p = toPx(y_m, 0.0);
+            const x = clamp(p.x, pad + 12, w - pad - 12);
+
+            // Glowing dot on the y(m) axis
+            sideCtx.save();
+            sideCtx.fillStyle = dotFill;
+            sideCtx.shadowBlur = 10;
+            sideCtx.shadowColor = dotGlow;
+            sideCtx.beginPath();
+            sideCtx.arc(x, axisY, 3.5, 0, Math.PI * 2);
+            sideCtx.fill();
+            sideCtx.restore();
+
+            // Label centered under mark
+            drawText(label, x, axisY + 10, 'center', 'top');
+          };
+
+          drawVLine(0.0, gridStroke, null);
+          drawVLine(netY, gridStroke, null);
+          drawVLine(serviceLineY, gridStroke, null);
+          drawVLine(COURT_L_M, gridStroke, null);
+          drawAxisMarker(0.0, 'BL 0m');
+          drawAxisMarker(netY, `net ${netY.toFixed(1)}m`);
+          drawAxisMarker(serviceLineY, `service ${serviceLineY.toFixed(1)}m`);
+          drawAxisMarker(COURT_L_M, `recv BL ${COURT_L_M.toFixed(1)}m`);
           drawVLine(COURT_L_M, gridStroke, `recv BL ${COURT_L_M.toFixed(1)}m`, h - 18);
 
           // Net
